@@ -288,6 +288,14 @@ info "Ensuring pip is up to date inside venv..."
 "$VENV_DIR/bin/pip" install --upgrade pip -q
 ok "pip is up to date"
 
+# ── Remove eventlet if installed (breaks Python 3.13) ────────────────────────
+if "$VENV_DIR/bin/pip" show eventlet &>/dev/null; then
+    info "Removing eventlet (incompatible with Python 3.13)..."
+    "$VENV_DIR/bin/pip" uninstall -y eventlet -q
+    ok "eventlet removed"
+    INSTALLED+=("removed-eventlet")
+fi
+
 # ── Python packages ───────────────────────────────────────────────────────────
 if [ "$NEED_PY_DEPS" = "true" ]; then
     info "Installing Python packages from requirements.txt..."

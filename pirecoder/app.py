@@ -11,7 +11,7 @@ from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "audio-recorder-secret"
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 RECORDINGS_DIR = Path("recordings")
 RECORDINGS_DIR.mkdir(exist_ok=True)
