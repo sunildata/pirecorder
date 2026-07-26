@@ -417,6 +417,139 @@
       text-align: center;
       max-width: 120px;
     }
+
+    /* ── Phase tabs (section 10) ─────────────────────────────────── */
+    .phase-tab {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.2s, color 0.2s, border-color 0.2s;
+    }
+    .phase-tab.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .phase-tab:not(.active):hover { color: var(--text); border-color: var(--accent); }
+
+    .phase-panel { display: none; }
+    .phase-panel.active { display: block; }
+
+    /* ── Command blocks ──────────────────────────────────────────── */
+    .cmd-block {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 10px;
+      font-family: 'Consolas', 'Cascadia Code', monospace;
+    }
+    .cmd-label {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      font-family: 'Segoe UI', sans-serif;
+    }
+    .cmd-line {
+      font-size: 13px;
+      color: var(--green);
+      line-height: 1.8;
+    }
+    .cmd-line .prompt { color: var(--accent); margin-right: 8px; user-select: none; }
+    .cmd-out {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #4a5568;
+      border-left: 2px solid var(--border);
+      padding-left: 10px;
+      line-height: 1.6;
+    }
+
+    .code-pre {
+      background: #0d1117;
+      color: var(--text);
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      margin: 0;
+      white-space: pre;
+      overflow-x: auto;
+    }
+
+    /* ── Warn / info box ─────────────────────────────────────────── */
+    .warn-box {
+      background: #1c1a0a;
+      border-left: 3px solid var(--yellow);
+      border-radius: 0 6px 6px 0;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 12px;
+    }
+
+    /* ── Req grid (prerequisites) ────────────────────────────────── */
+    .req-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+    }
+    .req-item {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .req-item.ok { border-color: #1a3a2a; }
+    .req-icon { font-size: 20px; margin-bottom: 6px; }
+    .req-name { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .req-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+    /* ── Phone steps ─────────────────────────────────────────────── */
+    .phone-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      flex: 1 1 200px;
+    }
+    .phone-num {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .phone-text { font-size: 13px; line-height: 1.5; }
+
+    /* ── Nav buttons ─────────────────────────────────────────────── */
+    .nav-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 7px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .nav-btn:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
@@ -765,9 +898,231 @@
     </div>
   </div>
 
+  <!-- ── 10. Run on Raspberry Pi ───────────────────────────────── -->
+  <div class="section-title">10 · How to Run on Raspberry Pi</div>
+
+  <!-- Phase tabs -->
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;" id="phase-tabs">
+    <button class="phase-tab active" onclick="showPhase(0)">① Prerequisites</button>
+    <button class="phase-tab" onclick="showPhase(1)">② Install Dependencies</button>
+    <button class="phase-tab" onclick="showPhase(2)">③ Python Setup</button>
+    <button class="phase-tab" onclick="showPhase(3)">④ Run the App</button>
+    <button class="phase-tab" onclick="showPhase(4)">⑤ Connect from Phone</button>
+    <button class="phase-tab" onclick="showPhase(5)">⑥ Autostart (optional)</button>
+  </div>
+
+  <!-- Phase 0: Prerequisites -->
+  <div class="phase-panel active" id="phase-0">
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-title">① What you need before starting</div>
+      <div class="req-grid">
+        <div class="req-item ok">
+          <div class="req-icon">🖥</div>
+          <div class="req-name">Raspberry Pi OS</div>
+          <div class="req-desc">Bullseye or Bookworm (32-bit or 64-bit). Run <code>cat /etc/os-release</code> to check.</div>
+        </div>
+        <div class="req-item ok">
+          <div class="req-icon">🐍</div>
+          <div class="req-name">Python 3.9+</div>
+          <div class="req-desc">Pre-installed on Pi OS. Verify: <code>python3 --version</code></div>
+        </div>
+        <div class="req-item ok">
+          <div class="req-icon">🎤</div>
+          <div class="req-name">USB Microphone</div>
+          <div class="req-desc">Plug in before booting. Check it's detected: <code>arecord -l</code></div>
+        </div>
+        <div class="req-item ok">
+          <div class="req-icon">📶</div>
+          <div class="req-name">Wi-Fi connected</div>
+          <div class="req-desc">Pi and your phone must be on the same Wi-Fi network.</div>
+        </div>
+        <div class="req-item ok">
+          <div class="req-icon">📁</div>
+          <div class="req-name">Project files on Pi</div>
+          <div class="req-desc"><code>app.py</code>, <code>requirements.txt</code>, <code>templates/index.html</code> already transferred.</div>
+        </div>
+        <div class="req-item ok">
+          <div class="req-icon">🌐</div>
+          <div class="req-name">Internet access (first run)</div>
+          <div class="req-desc">Needed to <code>apt install</code> and <code>pip install</code> dependencies.</div>
+        </div>
+      </div>
+    </div>
+    <div style="text-align:right;"><button class="nav-btn" onclick="showPhase(1)">Next: Install Dependencies →</button></div>
+  </div>
+
+  <!-- Phase 1: System deps -->
+  <div class="phase-panel" id="phase-1">
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-title">② Install system dependencies</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">Run these in the terminal on your Pi (SSH or directly).</p>
+
+      <div class="cmd-block">
+        <div class="cmd-label">Update package list</div>
+        <div class="cmd-line"><span class="prompt">$</span> sudo apt update</div>
+      </div>
+      <div class="cmd-block">
+        <div class="cmd-label">Install PortAudio (required by PyAudio) + Python venv</div>
+        <div class="cmd-line"><span class="prompt">$</span> sudo apt install -y portaudio19-dev python3-venv python3-pip</div>
+      </div>
+      <div class="cmd-block">
+        <div class="cmd-label">Verify mic is visible to ALSA</div>
+        <div class="cmd-line"><span class="prompt">$</span> arecord -l</div>
+        <div class="cmd-out">Expected output: card N: USB Audio [USB Audio], device 0: USB Audio [USB Audio Analog Stereo]</div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;"><button class="nav-btn" onclick="showPhase(0)">← Back</button><button class="nav-btn" onclick="showPhase(2)">Next: Python Setup →</button></div>
+  </div>
+
+  <!-- Phase 2: Python venv -->
+  <div class="phase-panel" id="phase-2">
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-title">③ Create virtual environment &amp; install Python packages</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">Do this once inside the project folder.</p>
+
+      <div class="cmd-block">
+        <div class="cmd-label">Go to your project folder (adjust path as needed)</div>
+        <div class="cmd-line"><span class="prompt">$</span> cd ~/pirecoder</div>
+      </div>
+      <div class="cmd-block">
+        <div class="cmd-label">Create a virtual environment</div>
+        <div class="cmd-line"><span class="prompt">$</span> python3 -m venv venv</div>
+      </div>
+      <div class="cmd-block">
+        <div class="cmd-label">Activate it (you must do this every new terminal session)</div>
+        <div class="cmd-line"><span class="prompt">$</span> source venv/bin/activate</div>
+        <div class="cmd-out">Prompt changes to: (venv) pi@raspberrypi:~/pirecoder $</div>
+      </div>
+      <div class="cmd-block">
+        <div class="cmd-label">Install all Python dependencies from requirements.txt</div>
+        <div class="cmd-line"><span class="prompt">$</span> pip install -r requirements.txt</div>
+        <div class="cmd-out">Installs: Flask 3.0.3 · flask-socketio 5.3.6 · pyaudio 0.2.14 · eventlet 0.36.1</div>
+      </div>
+      <div class="cmd-block">
+        <div class="cmd-label">Verify installation</div>
+        <div class="cmd-line"><span class="prompt">$</span> pip list | grep -E "Flask|pyaudio|eventlet"</div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;"><button class="nav-btn" onclick="showPhase(1)">← Back</button><button class="nav-btn" onclick="showPhase(3)">Next: Run the App →</button></div>
+  </div>
+
+  <!-- Phase 3: Run -->
+  <div class="phase-panel" id="phase-3">
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-title">④ Run the app</div>
+
+      <div class="cmd-block">
+        <div class="cmd-label">Make sure venv is active, then start the server</div>
+        <div class="cmd-line"><span class="prompt">$</span> python app.py</div>
+        <div class="cmd-out">Expected: * running on http://0.0.0.0:5000</div>
+      </div>
+
+      <div class="cmd-block">
+        <div class="cmd-label">Find your Pi's IP address (open a second terminal)</div>
+        <div class="cmd-line"><span class="prompt">$</span> hostname -I</div>
+        <div class="cmd-out">Example output: 192.168.1.42</div>
+      </div>
+
+      <div class="warn-box">
+        <strong>Keep the terminal open.</strong> Closing it stops the server. Use systemd (Step ⑥) or <code>tmux</code> / <code>screen</code> to keep it running after you close SSH.
+      </div>
+
+      <div class="cmd-block" style="margin-top:14px;">
+        <div class="cmd-label">Run in background with tmux (optional, keeps running after SSH disconnect)</div>
+        <div class="cmd-line"><span class="prompt">$</span> tmux new -s recorder</div>
+        <div class="cmd-line"><span class="prompt">$</span> source venv/bin/activate && python app.py</div>
+        <div class="cmd-out">Detach with Ctrl+B then D · Re-attach with: tmux attach -t recorder</div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;"><button class="nav-btn" onclick="showPhase(2)">← Back</button><button class="nav-btn" onclick="showPhase(4)">Next: Connect from Phone →</button></div>
+  </div>
+
+  <!-- Phase 4: Phone -->
+  <div class="phase-panel" id="phase-4">
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-title">⑤ Open from your phone</div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px;">
+        <div class="phone-step"><div class="phone-num">1</div><div class="phone-text">Connect your phone to the <strong>same Wi-Fi</strong> as the Pi</div></div>
+        <div class="phone-step"><div class="phone-num">2</div><div class="phone-text">Open any browser (Chrome, Safari, Firefox)</div></div>
+        <div class="phone-step"><div class="phone-num">3</div><div class="phone-text">Go to <code style="font-size:14px;">http://&lt;PI_IP&gt;:5000</code><br><span style="font-size:11px;color:var(--muted);">e.g. http://192.168.1.42:5000</span></div></div>
+        <div class="phone-step"><div class="phone-num">4</div><div class="phone-text">Tap <strong>Start Recording</strong> — Pi's mic begins capturing</div></div>
+        <div class="phone-step"><div class="phone-num">5</div><div class="phone-text">Tap <strong>Stop</strong> — WAV saved to <code>recordings/</code> on the Pi</div></div>
+        <div class="phone-step"><div class="phone-num">6</div><div class="phone-text">Tap a recording to <strong>download</strong> it directly to your phone</div></div>
+      </div>
+
+      <div class="warn-box" style="border-color:var(--green);">
+        <strong>Tip:</strong> On Android/iOS you can "Add to Home Screen" in your browser menu to get an app-like shortcut — no app store needed.
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;"><button class="nav-btn" onclick="showPhase(3)">← Back</button><button class="nav-btn" onclick="showPhase(5)">Next: Autostart →</button></div>
+  </div>
+
+  <!-- Phase 5: Systemd -->
+  <div class="phase-panel" id="phase-5">
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-title">⑥ Autostart on boot with systemd <span style="font-size:11px;font-weight:400;color:var(--muted);">(optional)</span></div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">After this the recorder starts automatically every time the Pi boots — no SSH needed.</p>
+
+      <div class="cmd-block">
+        <div class="cmd-label">Create the service file</div>
+        <div class="cmd-line"><span class="prompt">$</span> sudo nano /etc/systemd/system/audio-recorder.service</div>
+      </div>
+
+      <div class="cmd-block">
+        <div class="cmd-label">Paste this content (adjust paths to match your setup)</div>
+        <pre class="code-pre">[Unit]
+Description=Pi Audio Recorder
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/pirecoder
+ExecStart=/home/pi/pirecoder/venv/bin/python app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target</pre>
+      </div>
+
+      <div class="cmd-block">
+        <div class="cmd-label">Enable and start the service</div>
+        <div class="cmd-line"><span class="prompt">$</span> sudo systemctl daemon-reload</div>
+        <div class="cmd-line"><span class="prompt">$</span> sudo systemctl enable audio-recorder</div>
+        <div class="cmd-line"><span class="prompt">$</span> sudo systemctl start audio-recorder</div>
+      </div>
+
+      <div class="cmd-block">
+        <div class="cmd-label">Check it's running</div>
+        <div class="cmd-line"><span class="prompt">$</span> sudo systemctl status audio-recorder</div>
+        <div class="cmd-out">Expected: ● audio-recorder.service - Pi Audio Recorder ... active (running)</div>
+      </div>
+
+      <div class="cmd-block">
+        <div class="cmd-label">View live logs</div>
+        <div class="cmd-line"><span class="prompt">$</span> journalctl -u audio-recorder -f</div>
+      </div>
+
+      <div class="warn-box" style="border-color:var(--green);">
+        <strong>Done!</strong> From now on, just power on the Pi and open <code>http://&lt;PI_IP&gt;:5000</code> from any phone on your Wi-Fi.
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;"><button class="nav-btn" onclick="showPhase(4)">← Back</button><span style="font-size:12px;color:var(--green);align-self:center;">✓ All steps complete</span></div>
+  </div>
+
 </div>
 
 <script>
+  function showPhase(idx) {
+    const total = 6;
+    for (let i = 0; i < total; i++) {
+      document.getElementById('phase-' + i).classList.toggle('active', i === idx);
+      document.querySelectorAll('.phase-tab')[i].classList.toggle('active', i === idx);
+    }
+    document.getElementById('phase-tabs').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
   function selectChannel(mode) {
     const isMono = mode === 'mono';
 
