@@ -209,11 +209,10 @@ if python3 -c "import eventlet" &>/dev/null; then
     ok "eventlet removed"; INSTALLED+=("removed-eventlet")
 fi
 
-# ── Python packages (system-wide) ─────────────────────────────────────────────
+# ── Python packages (system-wide via sudo) ────────────────────────────────────
 if [ "$NEED_PY_DEPS" = "true" ]; then
-    info "Installing Python packages system-wide..."
-    pip3 install --break-system-packages -r "$PROJECT_DIR/requirements.txt" \
-        || sudo pip3 install --break-system-packages -r "$PROJECT_DIR/requirements.txt"
+    info "Installing Python packages system-wide (sudo pip3)..."
+    sudo pip3 install --break-system-packages -r "$PROJECT_DIR/requirements.txt"
     ok "Python packages installed"; INSTALLED+=("python-packages")
 fi
 
@@ -242,6 +241,7 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/home/${SERVICE_USER}
 SupplementaryGroups=audio
 
 [Install]
