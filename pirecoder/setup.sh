@@ -148,13 +148,13 @@ fi
 # ── 10. Python packages ───────────────────────────────────────────────────────
 if [ -f "$VENV_DIR/bin/pip" ]; then
     MISSING_PY=()
-    for pkg in Flask flask-socketio pyaudio eventlet; do
+    for pkg in Flask flask-socketio pyaudio; do
         if ! "$VENV_DIR/bin/pip" show "$pkg" &>/dev/null; then
             MISSING_PY+=("$pkg")
         fi
     done
     if [ ${#MISSING_PY[@]} -eq 0 ]; then
-        skip "Python packages (Flask, flask-socketio, pyaudio, eventlet)"
+        skip "Python packages (Flask, flask-socketio, pyaudio)"
         SKIPPED+=("python-packages")
     else
         warn "Missing Python packages: ${MISSING_PY[*]}"
@@ -174,17 +174,16 @@ else
     NEED_RECORDINGS_DIR="true"
 fi
 
-# ── 12. systemd service ──────────────────────────────────────────────────────
+# ── 12. systemd service — always rewrite to guarantee correct paths ───────────
+NEED_SERVICE="true"
 if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-    skip "systemd service '$SERVICE_NAME' (already active)"
-    SKIPPED+=("systemd-service")
+    warn "Service running — will rewrite service file and restart to ensure correct config"
 else
     if [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
-        warn "Service file exists but not running — will restart it"
+        warn "Service file exists but not running — will rewrite and restart"
     else
         warn "systemd service '$SERVICE_NAME' — NOT installed"
     fi
-    NEED_SERVICE="true"
 fi
 
 # ── 13. Microphone (informational, non-blocking) ─────────────────────────────
@@ -228,7 +227,7 @@ if [ "$NEED_ALSA_UTILS"      = "true" ]; then plan_add "apt install alsa-utils";
 if [ "$NEED_VENV"            = "true" ]; then plan_add "create Python virtual environment (venv/)"; fi
 if [ "$NEED_PY_DEPS"         = "true" ]; then plan_add "pip install -r requirements.txt"; fi
 if [ "$NEED_RECORDINGS_DIR"  = "true" ]; then plan_add "mkdir recordings/"; fi
-if [ "$NEED_SERVICE"         = "true" ]; then plan_add "create / restart systemd service '$SERVICE_NAME'"; fi
+plan_add "rewrite + restart systemd service '$SERVICE_NAME' (always ensures correct boot config)"
 
 if [ "$NEEDS_WORK" = false ]; then
     echo -e "  ${GREEN}✔  Everything is already set up — nothing to do!${RESET}"
@@ -335,15 +334,28 @@ EOF
     sudo systemctl daemon-reload
     sudo systemctl enable -q "$SERVICE_NAME"
     sudo systemctl restart "$SERVICE_NAME"
-    sleep 2
 
-    if sudo systemctl is-active --quiet "$SERVICE_NAME"; then
-        ok "Service '$SERVICE_NAME' started and enabled on boot"
-        INSTALLED+=("systemd-service")
-    else
-        warn "Service did not start cleanly"
-        warn "Run: journalctl -u $SERVICE_NAME -n 30"
-        WARNINGS+=("Service may not have started — check journalctl")
+    # Poll up to 15 seconds for the service to reach active or failed
+    info "Waiting for service to start..."
+    SVC_FINAL="unknown"
+    for i in $(seq 1 15); do
+        sleep 1
+        SVC_FINAL=$(sudo systemctl is-active "$SERVICE_NAME" 2>/dev/null || true)
+        if [ "$SVC_FINAL" = "active" ]; then
+            ok "Service '$SERVICE_NAME' is active and enabled on boot"
+            INSTALLED+=("systemd-service")
+            break
+        elif [ "$SVC_FINAL" = "failed" ]; then
+            break
+        fi
+        printf "  ${CYAN}→${RESET}  still starting... (%ss)\r" "$i"
+    done
+
+    if [ "$SVC_FINAL" != "active" ]; then
+        echo ""
+        warn "Service did not reach active state (status: $SVC_FINAL)"
+        warn "Check logs: journalctl -u $SERVICE_NAME -n 20 --no-pager"
+        WARNINGS+=("Service status: $SVC_FINAL — check journalctl -u $SERVICE_NAME")
     fi
 fi
 
