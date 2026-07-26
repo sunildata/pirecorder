@@ -327,6 +327,8 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+SupplementaryGroups=audio
 
 [Install]
 WantedBy=multi-user.target
