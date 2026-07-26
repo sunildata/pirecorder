@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0e14">
+  <title>{{ device_name }} — Sign In</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <h1>{{ device_name }}</h1>
+    <p>Wireless Audio Recorder</p>
+
+    <div class="card">
+      {% if error %}
+        <div class="banner error" style="margin-bottom:14px">{{ error }}</div>
+      {% endif %}
+      <form method="post" autocomplete="off">
+        <div class="field">
+          <input type="password" name="password" placeholder="Password"
+                 autocomplete="current-password" autofocus required>
+        </div>
+        <button type="submit" class="btn btn-rec" style="width:100%">Sign In</button>
+      </form>
+    </div>
+
+    <p style="font-size:11px">Recording continues regardless of this session.</p>
+  </div>
+</div>
+</body>
+</html>

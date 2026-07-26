@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0e14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>{% block title %}{{ device_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-brand">
+    <span class="rec-dot" id="nav-dot"></span>
+    <span>{{ device_name }}</span>
+  </div>
+  <div class="nav-links">
+    <a href="{{ url_for('web.dashboard') }}" class="{% block nav_dash %}{% endblock %}">Record</a>
+    <a href="{{ url_for('web.files') }}" class="{% block nav_files %}{% endblock %}">Files</a>
+    <a href="{{ url_for('web.settings') }}" class="{% block nav_settings %}{% endblock %}">Settings</a>
+    <a href="{{ url_for('web.logout') }}">Exit</a>
+  </div>
+</nav>
+
+<main class="container">
+  {% block content %}{% endblock %}
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"
+        onerror="document.getElementById('toast').textContent='Socket.IO CDN unreachable — using polling'"></script>
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

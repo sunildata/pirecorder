@@ -1,145 +1,163 @@
-# Raspberry Pi Audio Recorder
+# ZoomPi
 
-Control audio recording on your Raspberry Pi from any phone or browser on the same Wi-Fi network.
+A professional wireless audio recorder for Raspberry Pi, built for live
+events, conferences, churches, weddings, and studio mixer feeds — situations
+where losing the audio is not an option.
 
----
-
-## What it does
-
-- Start / Stop recording with one tap from your phone
-- Add an optional label to each recording (e.g. "keynote", "panel-1")
-- Live timer shows how long you've been recording
-- List all saved recordings — download or delete them directly from the browser
-- Multiple devices can watch the status in real time (WebSocket)
+Control it from any phone browser. No app to install.
 
 ---
 
-## Raspberry Pi Setup
+## The one thing that matters
 
-### 1. Install system dependencies
+**Audio never passes through Python.** `arecord` writes PCM straight from the
+USB interface to the SD card. Python supervises, meters, and serves the web
+interface, but a Python crash, a Wi-Fi drop, a closed browser, or a dead phone
+battery cannot interrupt a recording.
 
-```bash
-sudo apt update
-sudo apt install -y python3-pip python3-venv portaudio19-dev
-```
-
-### 2. Clone / copy the project
-
-```bash
-cd ~
-# copy the project folder here, or git clone your repo
-```
-
-### 3. Create a virtual environment and install packages
-
-```bash
-cd ~/audio_record
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 4. Check your microphone
-
-```bash
-arecord -l          # lists capture hardware
-```
-
-If your mic shows up (e.g. card 1, device 0), set the default:
-
-```bash
-# In ~/.asoundrc  (create if it doesn't exist)
-pcm.!default {
-    type hw
-    card 1          # change to your card number
-}
-ctl.!default {
-    type hw
-    card 1
-}
-```
-
-### 5. Run the server
-
-```bash
-source venv/bin/activate
-python app.py
-```
-
-The server starts on **port 5000**.
+A recording stops for exactly three reasons: you stop it, the power dies, or
+the card fills. And if the power dies, you lose about a second — the rest is
+already on disk and is automatically repaired on the next boot.
 
 ---
 
-## Connect from your phone
+## Features
 
-1. Make sure your phone is on the **same Wi-Fi** as the Raspberry Pi.
-2. Find the Pi's IP address:
-   ```bash
-   hostname -I
-   ```
-3. Open your phone browser and go to:
-   ```
-   http://<pi-ip-address>:5000
-   ```
-   e.g. `http://192.168.1.42:5000`
+**Recording**
+Stereo or mono WAV, up to the best format your interface supports (probed at
+runtime, not assumed). Auto-split by size or duration. Markers and notes
+during a take. Recording lock to prevent accidental stops. Optional −12 dB
+dual-recording as clipping insurance. Optional MP3 export.
 
----
+**Live control from any browser**
+Transport, recording timer, true dBFS VU meters with peak-hold and latching
+clip indicators, storage remaining, CPU temperature, battery, and IP —
+updated ten times a second over WebSocket, with automatic fallback to polling
+on a flaky network.
 
-## Auto-start on boot (optional)
+**Files**
+Browse by day, search, sort, in-browser playback with seeking, rename,
+delete, multi-select, and ZIP export.
 
-Create a systemd service so the recorder starts automatically:
+**Networking**
+Joins saved Wi-Fi networks by priority, then your phone's hotspot, and hosts
+its own access point if neither is available. Changing networks never touches
+audio.
 
-```bash
-sudo nano /etc/systemd/system/audio-recorder.service
-```
+**Hardware (optional)**
+Record and stop buttons, a status LED, and an SSD1306 OLED. Entirely
+additive — everything works without them.
 
-Paste:
-
-```ini
-[Unit]
-Description=Audio Recorder Web App
-After=network.target
-
-[Service]
-User=pi
-WorkingDirectory=/home/pi/audio_record
-ExecStart=/home/pi/audio_record/venv/bin/python app.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable it:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable audio-recorder
-sudo systemctl start audio-recorder
-```
+**Security**
+PBKDF2 password, session cookies, path-traversal defence on every file
+operation. Fully offline; no cloud dependency of any kind.
 
 ---
 
-## Recordings
+## Install
 
-All `.wav` files are saved in the `recordings/` folder on the Pi.  
-You can download them directly from the web UI or via SCP:
+On a Raspberry Pi running Raspberry Pi OS Lite (64-bit):
 
 ```bash
-scp pi@<pi-ip>:~/audio_record/recordings/*.wav ./
+git clone <your-repo-url> ~/zoompi
+cd ~/zoompi
+bash install.sh
+```
+
+Then open `http://<pi-ip>:5000` on your phone. Default password: `zoompi` —
+change it in Settings.
+
+For GPIO buttons and an OLED:
+
+```bash
+bash install.sh --hardware
+```
+
+Full OS preparation, tuning, and SD-image instructions are in
+[`docs/SETUP.md`](docs/SETUP.md).
+
+---
+
+## Hardware
+
+| Item | Notes |
+|---|---|
+| Raspberry Pi 3B or newer | |
+| **High Endurance** microSD, 32–256 GB | A standard card will fail under continuous writes |
+| USB audio interface with line input | Behringer UCA202 (16-bit) or UM2 / Scarlett Solo (24-bit) |
+| 5 V **2.5 A+** power supply | Under-voltage is the top cause of USB audio dropouts |
+
+Note: the UCA202/UCA222 is **16-bit/48 kHz only**. ZoomPi probes your
+interface at startup and offers only the formats it genuinely supports, so
+you always know what you are actually recording. See
+[`docs/HARDWARE.md`](docs/HARDWARE.md).
+
+---
+
+## Project layout
+
+```
+zoompi/
+├── recorder.py        arecord supervisor — the critical path
+├── levels.py          VU metering by reading the file tail
+├── audio_devices.py   Capability probing
+├── storage.py         Library, search, export, cleanup
+├── system.py          Telemetry
+├── db.py              SQLite metadata (audio works without it)
+├── wifi.py            AP / client mode chain
+├── postprocess.py     Offline FFmpeg DSP + MP3
+├── hardware.py        GPIO / OLED (optional)
+├── auth.py            Password + sessions
+├── api.py             REST surface
+└── app.py             Factory + WebSocket broadcast
+
+web/                   Templates and static assets
+systemd/               Service units + health timer
+docs/                  Architecture, hardware, API, setup, testing
+tests/smoke_test.py    67 checks, no hardware needed
+install.sh             Idempotent installer
+run.py                 Entry point
 ```
 
 ---
 
-## Audio quality
+## Documentation
 
-Default settings (editable in `app.py`):
+| Document | Contents |
+|---|---|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design, reliability model, trade-offs, resource budget |
+| [HARDWARE.md](docs/HARDWARE.md) | BOM, wiring diagrams, mixer connection, battery |
+| [API.md](docs/API.md) | Every endpoint, WebSocket events, examples |
+| [SETUP.md](docs/SETUP.md) | OS install, tuning, SD imaging, troubleshooting |
+| [TESTING.md](docs/TESTING.md) | Reliability tests, endurance runs, pre-event checklist |
 
-| Setting   | Value  |
-|-----------|--------|
-| Format    | 16-bit PCM |
-| Channels  | Mono (1) |
-| Sample rate | 44100 Hz |
-| Container | WAV |
+---
 
-Change `CHANNELS = 2` for stereo if your mic supports it.
+## Verify it works
+
+```bash
+python3 tests/smoke_test.py
+```
+
+Then run the reliability tests in [`docs/TESTING.md`](docs/TESTING.md) —
+especially the power-loss test — on the exact hardware you plan to use.
+
+---
+
+## Known limitations
+
+Stated plainly, because you should know them before an event:
+
+- **The Pi 3's single radio cannot host an access point and stay joined to a
+  network simultaneously.** Wi-Fi modes are a priority chain, not concurrent.
+- **DSP is offline, not live.** A real-time limiter/compressor at 48 kHz on a
+  Pi 3 cannot coexist with the "zero dropped samples" requirement, so
+  processing runs after the take against a preserved master.
+- **Audio during a USB unplug is gone.** The watchdog restarts capture within
+  about two seconds and everything either side is intact, but nothing can
+  recover samples from a disconnected device.
+- **Live waveform display is not implemented.** Meters are; scrolling
+  waveform rendering costs mobile battery and CPU for little practical gain
+  over a good peak meter.
+- **For genuinely irreplaceable audio, run a second recorder.** That is
+  standard professional practice and no software design replaces it.

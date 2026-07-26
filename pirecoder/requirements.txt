@@ -1,3 +1,7 @@
+# Core web stack
 Flask==3.0.3
 flask-socketio==5.3.6
-pyaudio==0.2.14
+simple-websocket==1.0.0
+
+# Optional hardware support — install with: pip install -r requirements-hw.txt
+# Kept separate so a Pi with no HAT doesn't pull in I2C/GPIO dependencies.

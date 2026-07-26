@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block nav_settings %}active{% endblock %}
+
+{% block content %}
+<div id="offline-badge" class="offline-badge">Reconnecting…</div>
+<div id="rec-warning" class="banner hidden">Recording in progress — audio format is locked until you stop.</div>
+
+<!-- Audio -->
+<div class="card">
+  <div class="card-title">Audio</div>
+  <div class="field">
+    <label>Input device</label>
+    <select id="audio_device"></select>
+    <div class="file-meta" id="device-info" style="margin-top:6px"></div>
+  </div>
+  <div class="field-row">
+    <div class="field">
+      <label>Sample rate</label>
+      <select id="sample_rate"></select>
+    </div>
+    <div class="field">
+      <label>Bit depth</label>
+      <select id="bit_depth"></select>
+    </div>
+  </div>
+  <div class="field-row">
+    <div class="field">
+      <label>Channels</label>
+      <select id="channels">
+        <option value="2">Stereo</option>
+        <option value="1">Mono</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Output format</label>
+      <select id="output_format">
+        <option value="wav">WAV only</option>
+        <option value="wav+mp3">WAV + MP3</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- Recording -->
+<div class="card">
+  <div class="card-title">Recording</div>
+  <div class="field-row">
+    <div class="field">
+      <label>Auto-split size (MB, 0 = off)</label>
+      <input type="number" id="auto_split_mb" min="0" max="4096" step="256">
+    </div>
+    <div class="field">
+      <label>Auto-split time (min, 0 = off)</label>
+      <input type="number" id="auto_split_minutes" min="0" max="600" step="5">
+    </div>
+  </div>
+  <div class="switch">
+    <div class="switch-text"><strong>Recording lock</strong><span>Require confirmation before stopping</span></div>
+    <label class="toggle"><input type="checkbox" id="recording_lock"><span class="toggle-track"></span></label>
+  </div>
+  <div class="switch">
+    <div class="switch-text"><strong>Dual recording</strong><span>Second take at −12 dB as clipping insurance</span></div>
+    <label class="toggle"><input type="checkbox" id="dual_recording"><span class="toggle-track"></span></label>
+  </div>
+</div>
+
+<!-- Post-processing -->
+<div class="card">
+  <div class="card-title">Post-Processing</div>
+  <div class="file-meta" style="margin-bottom:12px">
+    Applied after a take finishes; the original WAV is always kept untouched.
+  </div>
+  <div class="field">
+    <label>High-pass filter (Hz, 0 = off)</label>
+    <input type="number" id="post_highpass_hz" min="0" max="300" step="10">
+  </div>
+  <div class="switch">
+    <div class="switch-text"><strong>Limiter</strong><span>Ceiling at −0.3 dBFS</span></div>
+    <label class="toggle"><input type="checkbox" id="post_limiter"><span class="toggle-track"></span></label>
+  </div>
+  <div class="switch">
+    <div class="switch-text"><strong>Compressor</strong><span>3:1 above −18 dB</span></div>
+    <label class="toggle"><input type="checkbox" id="post_compressor"><span class="toggle-track"></span></label>
+  </div>
+  <div class="switch">
+    <div class="switch-text"><strong>Noise gate</strong><span>Suppress room noise between cues</span></div>
+    <label class="toggle"><input type="checkbox" id="post_noise_gate"><span class="toggle-track"></span></label>
+  </div>
+</div>
+
+<!-- Storage -->
+<div class="card">
+  <div class="card-title">Storage</div>
+  <div class="switch">
+    <div class="switch-text"><strong>Auto cleanup</strong><span>Delete oldest recordings when the card fills</span></div>
+    <label class="toggle"><input type="checkbox" id="auto_cleanup"><span class="toggle-track"></span></label>
+  </div>
+  <div class="field-row" style="margin-top:12px">
+    <div class="field">
+      <label>Cleanup above (% used)</label>
+      <input type="number" id="cleanup_threshold_pct" min="50" max="99">
+    </div>
+    <div class="field">
+      <label>Refuse to record below (MB free)</label>
+      <input type="number" id="min_free_mb" min="100" step="100">
+    </div>
+  </div>
+  <button class="btn btn-ghost btn-sm" id="run-cleanup">Run cleanup now</button>
+</div>
+
+<!-- Wi-Fi -->
+<div class="card">
+  <div class="card-title">Wi-Fi</div>
+  <div class="file-meta" id="wifi-state" style="margin-bottom:12px">Checking…</div>
+  <div class="field">
+    <label>Mode</label>
+    <select id="wifi_mode">
+      <option value="auto">Auto — join known networks, else host hotspot</option>
+      <option value="client">Client only</option>
+      <option value="ap">Always host hotspot</option>
+    </select>
+  </div>
+  <div class="field-row">
+    <div class="field"><label>Hotspot name</label><input type="text" id="ap_ssid" maxlength="32"></div>
+    <div class="field"><label>Hotspot password</label><input type="text" id="ap_password" minlength="8" maxlength="63"></div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm" id="wifi-scan">Scan networks</button>
+    <button class="btn btn-ghost btn-sm" id="wifi-ap">Start hotspot</button>
+    <button class="btn btn-ghost btn-sm" id="wifi-auto">Auto-connect</button>
+  </div>
+  <div id="wifi-list" style="margin-top:12px"></div>
+</div>
+
+<!-- Hardware -->
+<div class="card">
+  <div class="card-title">Hardware Controls</div>
+  <div class="switch">
+    <div class="switch-text"><strong>GPIO buttons &amp; LED</strong><span id="hw-state">Requires restart after changing</span></div>
+    <label class="toggle"><input type="checkbox" id="hardware_enabled"><span class="toggle-track"></span></label>
+  </div>
+  <div class="switch">
+    <div class="switch-text"><strong>OLED display</strong><span>SSD1306 128×64 over I²C</span></div>
+    <label class="toggle"><input type="checkbox" id="oled_enabled"><span class="toggle-track"></span></label>
+  </div>
+  <div class="field-row" style="margin-top:12px">
+    <div class="field"><label>Record pin</label><input type="number" id="gpio_record_button" min="2" max="27"></div>
+    <div class="field"><label>Stop pin</label><input type="number" id="gpio_stop_button" min="2" max="27"></div>
+    <div class="field"><label>LED pin</label><input type="number" id="gpio_status_led" min="2" max="27"></div>
+  </div>
+</div>
+
+<!-- Device -->
+<div class="card">
+  <div class="card-title">Device &amp; Security</div>
+  <div class="field">
+    <label>Device name</label>
+    <input type="text" id="device_name" maxlength="32">
+  </div>
+  <div class="switch">
+    <div class="switch-text"><strong>Require login</strong><span>Password-protect the web interface</span></div>
+    <label class="toggle"><input type="checkbox" id="auth_enabled"><span class="toggle-track"></span></label>
+  </div>
+  <div class="field" style="margin-top:14px">
+    <label>Change password</label>
+    <div class="field-row">
+      <input type="password" id="new_password" placeholder="New password" autocomplete="new-password">
+      <button class="btn btn-ghost btn-sm" id="save-password" style="flex:0 0 auto">Update</button>
+    </div>
+  </div>
+</div>
+
+<button class="btn btn-rec" id="save" style="width:100%">Save Settings</button>
+<div style="height:20px"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+{% endblock %}

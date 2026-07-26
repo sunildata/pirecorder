@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime state — never commit recordings, credentials, or the session key
+recordings/
+data/
+*.db
+*.db-wal
+*.db-shm
+secret.key
+config.json
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

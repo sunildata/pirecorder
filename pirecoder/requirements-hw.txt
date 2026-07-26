@@ -1,0 +1,6 @@
+# Optional GPIO / OLED support.
+# Only needed if you wire physical buttons, LEDs, or an SSD1306 display.
+gpiozero==2.0.1
+lgpio==0.2.2.0
+adafruit-circuitpython-ssd1306==2.12.16
+Pillow==10.4.0

@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+#
+# ZoomPi installer — idempotent. Detects what is already present, installs
+# only what is missing, and verifies the result by probing the running API.
+#
+#   bash install.sh              normal install / upgrade
+#   bash install.sh --hardware   also install GPIO + OLED support
+#   bash install.sh --uninstall  remove services (recordings are kept)
+#
+set -uo pipefail
+
+readonly INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SERVICE_USER="${SUDO_USER:-$USER}"
+readonly RECORDINGS_DIR="${INSTALL_DIR}/recordings"
+readonly SERVICE_NAME="zoompi"
+readonly PORT=5000
+
+WITH_HARDWARE=0
+UNINSTALL=0
+for arg in "$@"; do
+  case "$arg" in
+    --hardware)  WITH_HARDWARE=1 ;;
+    --uninstall) UNINSTALL=1 ;;
+    *) echo "Unknown option: $arg"; exit 1 ;;
+  esac
+done
+
+# ── Output helpers ───────────────────────────────────────────────────────────
+if [ -t 1 ]; then
+  R='\033[0;31m'; G='\033[0;32m'; Y='\033[0;33m'; B='\033[0;34m'; D='\033[2m'; N='\033[0m'
+else
+  R=''; G=''; Y=''; B=''; D=''; N=''
+fi
+step() { printf "\n${B}==>${N} %s\n" "$1"; }
+ok()   { printf "  ${G}ok${N}   %s\n" "$1"; }
+skip() { printf "  ${D}skip${N} %s\n" "$1"; }
+warn() { printf "  ${Y}warn${N} %s\n" "$1"; }
+die()  { printf "  ${R}fail${N} %s\n" "$1"; exit 1; }
+
+# ── Uninstall ────────────────────────────────────────────────────────────────
+if [ "$UNINSTALL" -eq 1 ]; then
+  step "Removing ZoomPi services"
+  sudo systemctl disable --now "${SERVICE_NAME}.service"      2>/dev/null && ok "service stopped"
+  sudo systemctl disable --now "${SERVICE_NAME}-health.timer" 2>/dev/null && ok "health timer stopped"
+  sudo rm -f "/etc/systemd/system/${SERVICE_NAME}.service" \
+             "/etc/systemd/system/${SERVICE_NAME}-health.service" \
+             "/etc/systemd/system/${SERVICE_NAME}-health.timer"
+  sudo systemctl daemon-reload
+  ok "services removed — recordings in ${RECORDINGS_DIR} were kept"
+  exit 0
+fi
+
+echo "╔══════════════════════════════════════════════════════╗"
+echo "║   ZoomPi — Wireless Audio Recorder Installer         ║"
+echo "╚══════════════════════════════════════════════════════╝"
+echo "  install dir : ${INSTALL_DIR}"
+echo "  service user: ${SERVICE_USER}"
+
+# ── 1. Sanity ────────────────────────────────────────────────────────────────
+step "Checking environment"
+
+[ -f "${INSTALL_DIR}/run.py" ] || die "run.py not found — run this from the project directory"
+
+if [ "$(id -u)" -eq 0 ] && [ -z "${SUDO_USER:-}" ]; then
+  die "Run as a normal user (the script calls sudo itself), not as root"
+fi
+
+if ! sudo -n true 2>/dev/null; then
+  echo "  This installer needs sudo; you may be prompted for your password."
+  sudo true || die "sudo required"
+fi
+
+PY_VERSION="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)" \
+  || die "python3 not found"
+ok "python ${PY_VERSION}"
+
+if grep -qi "raspberry" /proc/device-tree/model 2>/dev/null; then
+  ok "$(tr -d '\0' < /proc/device-tree/model)"
+else
+  warn "not a Raspberry Pi — hardware features will be unavailable"
+fi
+
+# ── 2. System packages ───────────────────────────────────────────────────────
+step "System packages"
+
+APT_NEEDED=()
+for pkg in alsa-utils python3-pip python3-flask curl; do
+  if dpkg -s "$pkg" >/dev/null 2>&1; then
+    skip "$pkg"
+  else
+    APT_NEEDED+=("$pkg")
+  fi
+done
+
+# ffmpeg is only required for MP3 export and post-processing.
+if command -v ffmpeg >/dev/null 2>&1; then
+  skip "ffmpeg"
+else
+  APT_NEEDED+=(ffmpeg)
+fi
+
+if [ "${#APT_NEEDED[@]}" -gt 0 ]; then
+  echo "  installing: ${APT_NEEDED[*]}"
+  sudo apt-get update -qq || warn "apt update failed — continuing with cached lists"
+  sudo apt-get install -y -qq "${APT_NEEDED[@]}" || die "apt install failed"
+  ok "installed ${#APT_NEEDED[@]} package(s)"
+fi
+
+# ── 3. Python packages ───────────────────────────────────────────────────────
+step "Python packages"
+
+pip_install() {
+  # Bookworm marks the system Python as externally managed; this project is
+  # intentionally installed system-wide so systemd can run it without a venv.
+  sudo pip3 install --quiet --break-system-packages "$@" 2>/dev/null \
+    || sudo pip3 install --quiet "$@"
+}
+
+PIP_NEEDED=()
+python3 -c "import flask"          2>/dev/null || PIP_NEEDED+=("Flask==3.0.3")
+python3 -c "import flask_socketio" 2>/dev/null || PIP_NEEDED+=("flask-socketio==5.3.6")
+python3 -c "import simple_websocket" 2>/dev/null || PIP_NEEDED+=("simple-websocket==1.0.0")
+
+if [ "${#PIP_NEEDED[@]}" -gt 0 ]; then
+  echo "  installing: ${PIP_NEEDED[*]}"
+  pip_install "${PIP_NEEDED[@]}" || die "pip install failed"
+  ok "installed ${#PIP_NEEDED[@]} package(s)"
+else
+  skip "flask, flask-socketio, simple-websocket"
+fi
+
+# eventlet is incompatible with Python 3.12+ and breaks Flask-SocketIO's
+# threading mode if it happens to be importable.
+if python3 -c "import eventlet" 2>/dev/null; then
+  warn "removing eventlet (incompatible with Python ${PY_VERSION})"
+  sudo pip3 uninstall -y -q eventlet --break-system-packages 2>/dev/null \
+    || sudo pip3 uninstall -y -q eventlet 2>/dev/null || true
+fi
+
+if [ "$WITH_HARDWARE" -eq 1 ]; then
+  step "Hardware support"
+  HW_NEEDED=()
+  python3 -c "import gpiozero" 2>/dev/null || HW_NEEDED+=("gpiozero==2.0.1" "lgpio==0.2.2.0")
+  python3 -c "import adafruit_ssd1306" 2>/dev/null || \
+    HW_NEEDED+=("adafruit-circuitpython-ssd1306==2.12.16" "Pillow==10.4.0")
+  if [ "${#HW_NEEDED[@]}" -gt 0 ]; then
+    pip_install "${HW_NEEDED[@]}" && ok "GPIO/OLED libraries installed" \
+      || warn "hardware libraries failed — buttons and display will be disabled"
+  else
+    skip "gpiozero, adafruit-ssd1306"
+  fi
+  sudo raspi-config nonint do_i2c 0 2>/dev/null && ok "I2C enabled" || warn "could not enable I2C"
+fi
+
+# ── 4. Audio device ──────────────────────────────────────────────────────────
+step "Audio capture device"
+
+if ! id -nG "$SERVICE_USER" | grep -qw audio; then
+  sudo usermod -aG audio "$SERVICE_USER" && ok "added ${SERVICE_USER} to the audio group"
+  warn "group change applies after reboot"
+else
+  skip "${SERVICE_USER} already in audio group"
+fi
+
+CAPTURE_LIST="$(arecord -l 2>/dev/null)"
+if echo "$CAPTURE_LIST" | grep -q '^card'; then
+  echo "$CAPTURE_LIST" | grep '^card' | sed 's/^/  /'
+  if echo "$CAPTURE_LIST" | grep -qi usb; then
+    ok "USB audio interface detected"
+  else
+    warn "no USB interface found — the Pi has no built-in line input"
+  fi
+else
+  warn "no capture device detected — plug in your USB interface before recording"
+fi
+
+# ── 5. Directories ───────────────────────────────────────────────────────────
+step "Directories"
+
+for dir in "${RECORDINGS_DIR}" "${INSTALL_DIR}/data" "${INSTALL_DIR}/data/logs"; do
+  if [ -d "$dir" ]; then
+    skip "$(basename "$dir")/"
+  else
+    mkdir -p "$dir" && ok "created $(basename "$dir")/"
+  fi
+done
+sudo chown -R "${SERVICE_USER}:${SERVICE_USER}" \
+  "${RECORDINGS_DIR}" "${INSTALL_DIR}/data" 2>/dev/null || true
+
+FREE_GB="$(df -BG --output=avail "${RECORDINGS_DIR}" 2>/dev/null | tail -1 | tr -dc '0-9')"
+if [ -n "$FREE_GB" ]; then
+  HOURS=$(( FREE_GB * 1024 / 660 ))   # ~660 MB per hour at 48 kHz/16-bit stereo
+  ok "${FREE_GB} GB free (~${HOURS} h of stereo WAV)"
+  [ "$FREE_GB" -lt 2 ] && warn "very low free space"
+fi
+
+# ── 6. systemd ───────────────────────────────────────────────────────────────
+step "systemd services"
+
+render_unit() {
+  sed -e "s|__INSTALL_DIR__|${INSTALL_DIR}|g" \
+      -e "s|__USER__|${SERVICE_USER}|g" \
+      -e "s|__RECORDINGS_DIR__|${RECORDINGS_DIR}|g" \
+      "$1"
+}
+
+# Always rewrite: paths or the service user may have changed since last run.
+render_unit "${INSTALL_DIR}/systemd/zoompi.service" \
+  | sudo tee "/etc/systemd/system/${SERVICE_NAME}.service" >/dev/null
+ok "${SERVICE_NAME}.service"
+
+render_unit "${INSTALL_DIR}/systemd/zoompi-health.service" \
+  | sudo tee "/etc/systemd/system/${SERVICE_NAME}-health.service" >/dev/null
+sudo cp "${INSTALL_DIR}/systemd/zoompi-health.timer" \
+        "/etc/systemd/system/${SERVICE_NAME}-health.timer"
+ok "${SERVICE_NAME}-health.timer"
+
+sudo systemctl daemon-reload
+sudo systemctl enable "${SERVICE_NAME}.service" >/dev/null 2>&1 && ok "enabled at boot"
+sudo systemctl enable "${SERVICE_NAME}-health.timer" >/dev/null 2>&1 || true
+
+step "Starting service"
+sudo systemctl restart "${SERVICE_NAME}.service"
+sudo systemctl start "${SERVICE_NAME}-health.timer" 2>/dev/null || true
+
+# ── 7. Verify ────────────────────────────────────────────────────────────────
+# systemctl reporting "active" only means the process launched; the unit has
+# an 8-second ExecStartPre, so poll the real endpoint instead.
+step "Verifying"
+
+printf "  waiting for the API to respond"
+HEALTHY=0
+for _ in $(seq 1 45); do
+  if curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
+    HEALTHY=1
+    break
+  fi
+  printf "."
+  sleep 1
+done
+printf "\n"
+
+if [ "$HEALTHY" -eq 1 ]; then
+  ok "API responding on port ${PORT}"
+else
+  warn "API did not respond within 45 s — recent logs:"
+  sudo journalctl -u "${SERVICE_NAME}.service" -n 30 --no-pager | sed 's/^/    /'
+  echo
+  echo "  Try running it in the foreground to see the error:"
+  echo "    sudo systemctl stop ${SERVICE_NAME} && python3 ${INSTALL_DIR}/run.py"
+  exit 1
+fi
+
+# ── Done ─────────────────────────────────────────────────────────────────────
+IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[ -z "$IP" ] && IP="<pi-ip>"
+
+cat <<EOF
+
+╔══════════════════════════════════════════════════════╗
+║   Installation complete                              ║
+╚══════════════════════════════════════════════════════╝
+
+  Open on your phone:   http://${IP}:${PORT}
+  Default password:     zoompi   (change it in Settings)
+
+  systemctl status ${SERVICE_NAME}      service state
+  journalctl -u ${SERVICE_NAME} -f      live logs
+  bash install.sh --uninstall    remove services
+
+EOF
+
+if ! id -nG "$SERVICE_USER" | grep -qw audio; then
+  warn "reboot once so the audio group membership takes effect"
+fi

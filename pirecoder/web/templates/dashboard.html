@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block nav_dash %}active{% endblock %}
+
+{% block content %}
+<div id="offline-badge" class="offline-badge">Reconnecting — recording continues</div>
+
+<div id="alert" class="banner hidden"></div>
+
+<!-- Transport -->
+<div class="card">
+  <div class="timer" id="timer">00:00:00</div>
+  <div class="timer-sub" id="timer-sub">Ready</div>
+
+  <div class="field" style="margin-top:16px">
+    <input type="text" id="label" placeholder="Event / take label (optional)" maxlength="60">
+  </div>
+
+  <div class="transport">
+    <button class="btn btn-rec"   id="btn-record">Record</button>
+    <button class="btn btn-pause" id="btn-pause" disabled>Pause</button>
+    <button class="btn btn-stop"  id="btn-stop"  disabled>Stop</button>
+  </div>
+
+  <div class="transport" style="margin-top:9px">
+    <button class="btn btn-ghost" id="btn-marker" disabled style="flex:1">Add Marker</button>
+    <button class="btn btn-ghost" id="btn-notes"  style="flex:1">Notes</button>
+  </div>
+
+  <div class="markers" id="markers"></div>
+</div>
+
+<!-- Levels -->
+<div class="card">
+  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Input Level</span>
+    <span class="clip-badge" id="clip" title="Tap to reset">CLIP</span>
+  </div>
+
+  <div class="meter-row">
+    <span class="meter-label">L</span>
+    <div class="meter"><div class="meter-fill" id="m-l"></div><div class="meter-hold" id="h-l"></div></div>
+    <span class="meter-db" id="db-l">−∞</span>
+  </div>
+  <div class="meter-row">
+    <span class="meter-label">R</span>
+    <div class="meter"><div class="meter-fill" id="m-r"></div><div class="meter-hold" id="h-r"></div></div>
+    <span class="meter-db" id="db-r">−∞</span>
+  </div>
+  <div class="scale"><span>−60</span><span>−40</span><span>−20</span><span>−12</span><span>−6</span><span>0</span></div>
+</div>
+
+<!-- Take info -->
+<div class="card">
+  <div class="card-title">Current Take</div>
+  <div class="stats">
+    <div class="stat"><div class="stat-value" id="s-size">—</div><div class="stat-label">Size</div></div>
+    <div class="stat"><div class="stat-value" id="s-format">—</div><div class="stat-label">Format</div></div>
+    <div class="stat"><div class="stat-value" id="s-parts">—</div><div class="stat-label">Files</div></div>
+    <div class="stat"><div class="stat-value" id="s-device">—</div><div class="stat-label">Input</div></div>
+  </div>
+</div>
+
+<!-- Device -->
+<div class="card">
+  <div class="card-title">Device</div>
+  <div class="stats">
+    <div class="stat"><div class="stat-value" id="d-free">—</div><div class="stat-label">Free</div></div>
+    <div class="stat"><div class="stat-value" id="d-hours">—</div><div class="stat-label">Hrs Left</div></div>
+    <div class="stat"><div class="stat-value" id="d-temp">—</div><div class="stat-label">CPU °C</div></div>
+    <div class="stat"><div class="stat-value" id="d-cpu">—</div><div class="stat-label">CPU %</div></div>
+    <div class="stat"><div class="stat-value" id="d-batt">—</div><div class="stat-label">Power</div></div>
+    <div class="stat"><div class="stat-value" id="d-ip" style="font-size:12px">—</div><div class="stat-label">IP</div></div>
+  </div>
+  <div class="bar"><div class="bar-fill" id="d-bar"></div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,42 @@
+[Unit]
+Description=ZoomPi Wireless Audio Recorder
+Documentation=file://__INSTALL_DIR__/docs/ARCHITECTURE.md
+After=network.target sound.target local-fs.target
+Wants=sound.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+SupplementaryGroups=audio
+
+WorkingDirectory=__INSTALL_DIR__
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=HOME=/home/__USER__
+Environment=ZOOMPI_RECORDINGS=__RECORDINGS_DIR__
+
+# USB audio interfaces enumerate a few seconds after the network is up.
+# Starting before ALSA sees the card makes the first recording attempt fail.
+ExecStartPre=/bin/sleep 8
+ExecStart=/usr/bin/python3 __INSTALL_DIR__/run.py
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+
+# Audio capture must win against background work under CPU pressure.
+Nice=-10
+IOSchedulingClass=realtime
+IOSchedulingPriority=2
+
+# A stop signal has to let arecord finalise its WAV header.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zoompi
+
+[Install]
+WantedBy=multi-user.target

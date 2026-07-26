@@ -1,0 +1,12 @@
+[Unit]
+Description=ZoomPi health check
+After=zoompi.service
+
+[Service]
+Type=oneshot
+User=__USER__
+
+# Probing the HTTP endpoint catches a process that is alive but wedged —
+# systemd's own liveness check cannot tell the difference.
+ExecStart=/usr/bin/curl --fail --silent --max-time 10 http://127.0.0.1:5000/api/health
+ExecStopPost=/bin/sh -c 'test "$EXIT_STATUS" = "0" || systemctl restart zoompi.service'
