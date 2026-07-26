@@ -253,23 +253,31 @@ sudo systemctl daemon-reload
 sudo systemctl enable -q "$SERVICE_NAME"
 sudo systemctl restart "$SERVICE_NAME"
 
-# ── Poll up to 20 s for active / failed ──────────────────────────────────────
-info "Waiting for service to start..."
-SVC_FINAL="unknown"
-for i in $(seq 1 20); do
+# ── Poll until the port actually answers (systemd status alone lies during ──
+# ── ExecStartPre, and a crashed app still shows 'active' for a moment) ───────
+info "Waiting for app to respond on port $PORT ..."
+PORT_UP="false"
+for i in $(seq 1 40); do
     sleep 1
-    SVC_FINAL=$(sudo systemctl is-active "$SERVICE_NAME" 2>/dev/null || true)
-    if [ "$SVC_FINAL" = "active" ]; then
-        ok "Service is active and enabled on boot"; INSTALLED+=("systemd-service"); break
-    elif [ "$SVC_FINAL" = "failed" ]; then break; fi
-    printf "  ${CYAN}→${RESET}  still starting... (%ss)\r" "$i"
+    if curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/status" &>/dev/null; then
+        PORT_UP="true"
+        echo ""
+        ok "App is serving on port $PORT and enabled on boot"
+        INSTALLED+=("systemd-service")
+        break
+    fi
+    printf "  ${CYAN}→${RESET}  waiting for port %s ... (%ss)\r" "$PORT" "$i"
 done
 
-if [ "$SVC_FINAL" != "active" ]; then
+if [ "$PORT_UP" != "true" ]; then
     echo ""
-    warn "Service status: $SVC_FINAL"
-    warn "Check: journalctl -u $SERVICE_NAME -n 30 --no-pager"
-    WARNINGS+=("Service $SVC_FINAL — check journalctl")
+    SVC_FINAL=$(sudo systemctl is-active "$SERVICE_NAME" 2>/dev/null || true)
+    warn "App is NOT responding on port $PORT  (systemd says: $SVC_FINAL)"
+    echo ""
+    echo -e "  ${BOLD}${RED}── Last 25 log lines ──────────────────────────────${RESET}"
+    sudo journalctl -u "$SERVICE_NAME" -n 25 --no-pager || true
+    echo -e "  ${BOLD}${RED}───────────────────────────────────────────────────${RESET}"
+    WARNINGS+=("App not responding on port $PORT — see log dump above")
 fi
 
 # ── Post-install mic recheck ──────────────────────────────────────────────────
