@@ -317,11 +317,13 @@ if [ "$NEED_SERVICE" = "true" ]; then
     sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
 Description=Pi Audio Recorder (pirecoder)
-After=network.target sound.target
+After=network.target sound.target local-fs.target
+Wants=sound.target
 
 [Service]
 User=${SERVICE_USER}
 WorkingDirectory=${PROJECT_DIR}
+ExecStartPre=/bin/sleep 8
 ExecStart=${VENV_DIR}/bin/python ${PROJECT_DIR}/app.py
 Restart=always
 RestartSec=5
