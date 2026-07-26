@@ -248,6 +248,31 @@ sudo systemctl stop zoompi
 python3 ~/zoompi/run.py
 ```
 
+### "Address already in use" / port 5000 taken
+
+Almost always an older installation still running. Deleting the previous
+`app.py` during a `git pull` does **not** stop the process already running it
+— Linux keeps a running program alive after its file is removed, so the old
+service holds port 5000 and the new one cannot bind. systemd then restarts
+the new service in a loop, and every attempt fails the same way.
+
+`install.sh` now detects and retires previous installations automatically.
+To resolve it by hand:
+
+```bash
+# What is holding the port?
+sudo ss -tlnp | grep :5000
+
+# If it is an old service, disable it permanently
+sudo systemctl disable --now pirecorder.service
+
+# If it is a stray manual run, kill the PID
+sudo kill <pid>
+
+sudo systemctl restart zoompi
+curl -s localhost:5000/api/health
+```
+
 ### `ERR_CONNECTION_REFUSED` from the phone
 
 ```bash

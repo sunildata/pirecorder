@@ -219,6 +219,63 @@ sudo systemctl daemon-reload
 sudo systemctl enable "${SERVICE_NAME}.service" >/dev/null 2>&1 && ok "enabled at boot"
 sudo systemctl enable "${SERVICE_NAME}-health.timer" >/dev/null 2>&1 || true
 
+# ── 6b. Retire earlier installations ─────────────────────────────────────────
+# Upgrading from the pre-ZoomPi prototype leaves its service running. Deleting
+# the old app.py during `git pull` does not stop the process that is already
+# running it, so it keeps holding port 5000 and the new service cannot bind.
+step "Checking for a previous installation"
+
+port_holder_pid() {
+  sudo ss -tlnpH "sport = :${PORT}" 2>/dev/null \
+    | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2
+}
+
+unit_of_pid() {
+  # The cgroup path is the reliable way to map a PID back to its unit.
+  grep -o '[a-zA-Z0-9@_.\-]*\.service' "/proc/$1/cgroup" 2>/dev/null | head -1
+}
+
+RETIRED=0
+for legacy in pirecorder audiorecorder recorder piaudio; do
+  if systemctl list-unit-files "${legacy}.service" 2>/dev/null | grep -q "${legacy}.service"; then
+    sudo systemctl disable --now "${legacy}.service" >/dev/null 2>&1
+    ok "retired legacy ${legacy}.service"
+    RETIRED=1
+  fi
+done
+
+# Whatever the old unit was called, something may still hold the port.
+HOLDER_PID="$(port_holder_pid)"
+if [ -n "${HOLDER_PID:-}" ]; then
+  HOLDER_UNIT="$(unit_of_pid "$HOLDER_PID")"
+  HOLDER_CMD="$(ps -p "$HOLDER_PID" -o args= 2>/dev/null | cut -c1-70)"
+
+  if [ "${HOLDER_UNIT}" = "${SERVICE_NAME}.service" ]; then
+    skip "port ${PORT} held by our own service (will restart)"
+  elif [ -n "$HOLDER_UNIT" ]; then
+    warn "port ${PORT} held by ${HOLDER_UNIT} — disabling it"
+    sudo systemctl disable --now "$HOLDER_UNIT" >/dev/null 2>&1
+    ok "retired ${HOLDER_UNIT}"
+    RETIRED=1
+  else
+    # Not under systemd — most likely a manual `python3 app.py` left running.
+    warn "port ${PORT} held by PID ${HOLDER_PID}: ${HOLDER_CMD}"
+    sudo kill "$HOLDER_PID" 2>/dev/null
+    sleep 2
+    kill -0 "$HOLDER_PID" 2>/dev/null && sudo kill -9 "$HOLDER_PID" 2>/dev/null
+    ok "stopped stray process ${HOLDER_PID}"
+    RETIRED=1
+  fi
+
+  # Give the kernel a moment to release the socket.
+  for _ in $(seq 1 10); do
+    [ -z "$(port_holder_pid)" ] && break
+    sleep 1
+  done
+fi
+
+[ "$RETIRED" -eq 0 ] && skip "no previous installation found"
+
 step "Starting service"
 sudo systemctl restart "${SERVICE_NAME}.service"
 sudo systemctl start "${SERVICE_NAME}-health.timer" 2>/dev/null || true
@@ -243,10 +300,38 @@ printf "\n"
 if [ "$HEALTHY" -eq 1 ]; then
   ok "API responding on port ${PORT}"
 else
-  warn "API did not respond within 45 s — recent logs:"
-  sudo journalctl -u "${SERVICE_NAME}.service" -n 30 --no-pager | sed 's/^/    /'
+  printf "  ${R}fail${N} API did not respond within 45 s\n\n"
+
+  # Name the actual cause instead of making the reader parse a log dump.
+  RECENT="$(sudo journalctl -u "${SERVICE_NAME}.service" -n 40 --no-pager 2>/dev/null)"
+
+  if echo "$RECENT" | grep -q "Address already in use"; then
+    BLOCKER_PID="$(port_holder_pid)"
+    echo "  Cause: something else is already listening on port ${PORT}."
+    if [ -n "${BLOCKER_PID:-}" ]; then
+      echo "  Held by PID ${BLOCKER_PID}: $(ps -p "$BLOCKER_PID" -o args= 2>/dev/null | cut -c1-60)"
+      echo "  Unit:    $(unit_of_pid "$BLOCKER_PID" || echo 'not a systemd service')"
+    fi
+    echo
+    echo "  Fix:  sudo kill ${BLOCKER_PID:-<pid>} && sudo systemctl restart ${SERVICE_NAME}"
+
+  elif echo "$RECENT" | grep -qi "ModuleNotFoundError\|ImportError"; then
+    echo "  Cause: a Python dependency is missing."
+    echo "$RECENT" | grep -i "ModuleNotFoundError\|ImportError" | tail -3 | sed 's/^/    /'
+    echo
+    echo "  Fix:  sudo pip3 install --break-system-packages -r ${INSTALL_DIR}/requirements.txt"
+
+  elif echo "$RECENT" | grep -q "Permission denied"; then
+    echo "  Cause: a permissions problem."
+    echo "  Fix:  sudo chown -R ${SERVICE_USER}: ${INSTALL_DIR}/data ${RECORDINGS_DIR}"
+
+  else
+    echo "  Recent logs:"
+    echo "$RECENT" | tail -25 | sed 's/^/    /'
+  fi
+
   echo
-  echo "  Try running it in the foreground to see the error:"
+  echo "  Run it in the foreground for the full traceback:"
   echo "    sudo systemctl stop ${SERVICE_NAME} && python3 ${INSTALL_DIR}/run.py"
   exit 1
 fi
