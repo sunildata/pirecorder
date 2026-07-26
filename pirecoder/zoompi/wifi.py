@@ -28,18 +28,55 @@ AP_CONNECTION = "zoompi-ap"
 _lock = threading.RLock()
 
 
+PERMISSION_HINT = (
+    "NetworkManager denied the request. The service runs as a systemd unit "
+    "with no login session, so polkit blocks network changes by default. "
+    "Run: sudo bash install.sh  (installs the required polkit rule)"
+)
+
+
+def _looks_like_permission_error(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        s in lowered
+        for s in ("not authorized", "insufficient privileges", "permission denied",
+                  "access denied", "authorization")
+    )
+
+
 def _nmcli(args: list[str], timeout: int = 25) -> tuple[int, str, str]:
+    """Run nmcli, retrying through sudo if polkit refuses.
+
+    A systemd service has no active local session, which is exactly the
+    condition NetworkManager's default polkit policy refuses. The installed
+    polkit rule normally handles this; the sudo retry is a fallback for
+    systems where that rule is missing.
+    """
     try:
         p = subprocess.run(
             ["nmcli"] + args, capture_output=True, text=True, timeout=timeout
         )
-        return p.returncode, p.stdout.strip(), p.stderr.strip()
+        rc, out, err = p.returncode, p.stdout.strip(), p.stderr.strip()
     except FileNotFoundError:
         return 127, "", "nmcli not found (NetworkManager not installed)"
     except subprocess.TimeoutExpired:
         return 124, "", "nmcli timed out"
     except OSError as exc:
         return 1, "", str(exc)
+
+    if rc != 0 and _looks_like_permission_error(err):
+        try:
+            p = subprocess.run(
+                ["sudo", "-n", "nmcli"] + args,
+                capture_output=True, text=True, timeout=timeout,
+            )
+            if p.returncode == 0:
+                return 0, p.stdout.strip(), ""
+            return rc, out, f"{err}\n{PERMISSION_HINT}"
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            return rc, out, f"{err}\n{PERMISSION_HINT}"
+
+    return rc, out, err
 
 
 def available() -> bool:
@@ -77,13 +114,22 @@ def status() -> dict:
         ["-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS", "device", "show", iface]
     )
     if rc == 0:
+        profile = None
+        state_ok = False
         for line in out.splitlines():
             key, _, value = line.partition(":")
-            if key == "GENERAL.CONNECTION" and value not in ("", "--"):
-                info["ssid"] = value
-                info["connected"] = True
+            if key == "GENERAL.STATE":
+                # nmcli reports e.g. "100 (connected)". Anything lower means
+                # disconnected, connecting, or a failing retry loop -- all of
+                # which must count as "not connected" so fallback can run.
+                state_ok = value.strip().startswith("100")
+            elif key == "GENERAL.CONNECTION" and value not in ("", "--"):
+                profile = value
             elif key.startswith("IP4.ADDRESS"):
                 info["ip"] = value.split("/")[0]
+
+        info["ssid"] = profile
+        info["connected"] = state_ok and profile is not None
 
     rc, out, _ = _nmcli(["-t", "-f", "ACTIVE,SSID,SIGNAL,MODE", "device", "wifi", "list"])
     if rc == 0:
@@ -251,14 +297,17 @@ def forget(ssid: str) -> dict:
 
 
 class WifiWatchdog:
-    """Re-runs auto_connect when the link drops.
+    """Brings the network up at boot, then restores it whenever it drops.
 
     Recording is never consulted or interrupted — this only restores the
     control channel so the phone can reconnect and see live status.
     """
 
-    def __init__(self, interval: float = 45.0) -> None:
+    def __init__(self, interval: float = 45.0, startup_delay: float = 10.0) -> None:
         self._interval = interval
+        # NetworkManager needs a moment after boot to finish its own attempt
+        # at the saved networks; checking instantly would race it.
+        self._startup_delay = startup_delay
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -273,13 +322,32 @@ class WifiWatchdog:
         self._stop.set()
 
     def _run(self) -> None:
+        # Run the first check shortly after boot rather than one full interval
+        # later. Without this, a Pi with no known network sat unreachable for
+        # 45 seconds because nothing had started the fallback AP yet.
+        if self._stop.wait(self._startup_delay):
+            return
+        self._check(first=True)
+
         while not self._stop.wait(self._interval):
-            try:
-                if not available():
-                    continue
-                st = status()
-                if not st["connected"]:
-                    db.log_event("wifi_lost", {"detail": "watchdog reconnecting"})
-                    auto_connect()
-            except Exception as exc:
-                db.log_event("wifi_watchdog_error", {"error": str(exc)[:200]})
+            self._check()
+
+    def _check(self, first: bool = False) -> None:
+        try:
+            if not available():
+                return
+            st = status()
+            if st["connected"]:
+                if first:
+                    db.log_event("wifi_ready", {"ssid": st["ssid"], "mode": st["mode"]})
+                return
+
+            db.log_event(
+                "wifi_reconnecting",
+                {"reason": "boot" if first else "link lost"},
+            )
+            result = auto_connect()
+            if not result.get("ok"):
+                db.log_event("wifi_reconnect_failed", {"error": result.get("error", "")[:300]})
+        except Exception as exc:
+            db.log_event("wifi_watchdog_error", {"error": str(exc)[:200]})

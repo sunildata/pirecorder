@@ -1,0 +1,18 @@
+// Allow the ZoomPi service to manage Wi-Fi.
+//
+// NetworkManager's default polkit policy grants network configuration only to
+// an *active local session*. A systemd service has no session and no seat, so
+// nmcli calls from the daemon are refused with "not authorized" -- which
+// silently prevents the fallback access point from ever starting.
+//
+// This grants only NetworkManager actions, and only to the service user.
+
+polkit.addRule(function (action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") !== 0) {
+        return undefined;
+    }
+    if (subject.user === "__USER__" || subject.isInGroup("netdev")) {
+        return polkit.Result.YES;
+    }
+    return undefined;
+});

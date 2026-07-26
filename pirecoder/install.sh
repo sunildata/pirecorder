@@ -44,7 +44,10 @@ if [ "$UNINSTALL" -eq 1 ]; then
   sudo systemctl disable --now "${SERVICE_NAME}-health.timer" 2>/dev/null && ok "health timer stopped"
   sudo rm -f "/etc/systemd/system/${SERVICE_NAME}.service" \
              "/etc/systemd/system/${SERVICE_NAME}-health.service" \
-             "/etc/systemd/system/${SERVICE_NAME}-health.timer"
+             "/etc/systemd/system/${SERVICE_NAME}-health.timer" \
+             "/etc/polkit-1/rules.d/50-zoompi-network.rules" \
+             "/etc/sudoers.d/zoompi-nmcli"
+  sudo nmcli connection delete zoompi-ap 2>/dev/null && ok "hotspot profile removed"
   sudo systemctl daemon-reload
   ok "services removed — recordings in ${RECORDINGS_DIR} were kept"
   exit 0
@@ -194,6 +197,44 @@ if [ -n "$FREE_GB" ]; then
   [ "$FREE_GB" -lt 2 ] && warn "very low free space"
 fi
 
+# ── 5b. Network permissions ──────────────────────────────────────────────────
+# Without this the service can read Wi-Fi state but cannot change it, so the
+# fallback access point never starts when no known network is in range.
+step "Network permissions"
+
+if command -v nmcli >/dev/null 2>&1; then
+  if id -nG "$SERVICE_USER" | grep -qw netdev; then
+    skip "${SERVICE_USER} already in netdev group"
+  else
+    sudo usermod -aG netdev "$SERVICE_USER" && ok "added ${SERVICE_USER} to netdev"
+  fi
+
+  POLKIT_DIR=/etc/polkit-1/rules.d
+  if [ -d "$POLKIT_DIR" ]; then
+    sed "s|__USER__|${SERVICE_USER}|g" \
+        "${INSTALL_DIR}/systemd/50-zoompi-network.rules" \
+      | sudo tee "${POLKIT_DIR}/50-zoompi-network.rules" >/dev/null
+    sudo chmod 644 "${POLKIT_DIR}/50-zoompi-network.rules"
+    ok "polkit rule installed"
+    sudo systemctl restart polkit 2>/dev/null || true
+  else
+    warn "polkit rules directory not found — falling back to sudoers"
+  fi
+
+  # Belt and braces: the code retries through sudo if polkit still refuses.
+  echo "${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/nmcli" \
+    | sudo tee /etc/sudoers.d/zoompi-nmcli >/dev/null
+  sudo chmod 440 /etc/sudoers.d/zoompi-nmcli
+  if sudo visudo -cf /etc/sudoers.d/zoompi-nmcli >/dev/null 2>&1; then
+    ok "sudoers fallback installed"
+  else
+    sudo rm -f /etc/sudoers.d/zoompi-nmcli
+    warn "sudoers entry rejected — removed"
+  fi
+else
+  warn "nmcli not found — Wi-Fi management will be unavailable"
+fi
+
 # ── 6. systemd ───────────────────────────────────────────────────────────────
 step "systemd services"
 
@@ -299,6 +340,20 @@ printf "\n"
 
 if [ "$HEALTHY" -eq 1 ]; then
   ok "API responding on port ${PORT}"
+
+  # Prove the service can actually change Wi-Fi, rather than assuming the
+  # polkit rule took effect. A read-only nmcli call always succeeds, so this
+  # checks a permission the fallback AP genuinely needs.
+  if command -v nmcli >/dev/null 2>&1; then
+    PERM="$(sudo -u "$SERVICE_USER" nmcli general permissions 2>/dev/null \
+            | grep 'settings.modify.system' | awk '{print $2}')"
+    case "$PERM" in
+      yes)  ok "Wi-Fi management authorised for ${SERVICE_USER}" ;;
+      auth) warn "Wi-Fi needs interactive auth — the sudo fallback will be used" ;;
+      *)    warn "Wi-Fi management not authorised; hotspot fallback may fail"
+            echo "    Check: sudo -u ${SERVICE_USER} nmcli general permissions" ;;
+    esac
+  fi
 else
   printf "  ${R}fail${N} API did not respond within 45 s\n\n"
 

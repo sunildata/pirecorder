@@ -221,10 +221,14 @@ def create_app() -> tuple[Flask, SocketIO]:
         except Exception as exc:
             log.warning("Hardware init failed: %s", exc)
 
-    if wifi.available() and config.get("wifi_mode") != "client":
-        watchdog = wifi.WifiWatchdog()
-        watchdog.start()
+    # The watchdog runs in every mode. `auto_connect()` already respects
+    # wifi_mode (client mode never starts an AP), and skipping the watchdog
+    # in client mode meant a dropped link was never re-established either.
+    if wifi.available():
+        wifi.WifiWatchdog().start()
         log.info("Wi-Fi watchdog started (mode=%s)", config.get("wifi_mode"))
+    else:
+        log.warning("NetworkManager unavailable — Wi-Fi management disabled")
 
     db.log_event("service_started", {"version": _version(), "recovered": len(recovered)})
     log.info("ZoomPi ready on http://%s:5000", system.primary_ip())

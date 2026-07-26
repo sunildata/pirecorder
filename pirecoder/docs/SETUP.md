@@ -326,6 +326,49 @@ In order of likelihood:
    other devices.
 4. **Thermal throttling.** Above ~80 °C. Add airflow.
 
+### Hotspot does not start when there is no known network
+
+The fallback AP requires the service to *change* NetworkManager settings, not
+just read them. NetworkManager grants that only to an **active local
+session**, and a systemd service has neither a session nor a seat — so
+`nmcli connection add` is refused and the AP never appears.
+
+`install.sh` fixes this by installing a polkit rule and adding the service
+user to `netdev`. To confirm it worked:
+
+```bash
+# Should print "yes" for settings.modify.system
+sudo -u pi nmcli general permissions | grep settings.modify.system
+
+# Did the watchdog try, and what happened?
+journalctl -u zoompi | grep -i wifi
+```
+
+Force the AP up by hand to see the real error:
+
+```bash
+sudo -u pi nmcli connection up zoompi-ap
+```
+
+Other things worth checking:
+
+```bash
+# The radio must be on and unblocked
+nmcli radio wifi          # expect "enabled"
+rfkill list               # nothing should say "yes" under Soft/Hard blocked
+
+# Wi-Fi country must be set or the AP silently refuses to broadcast
+sudo raspi-config nonint get_wifi_country
+sudo raspi-config nonint do_wifi_country IN     # your ISO code
+
+# Does the profile exist?
+nmcli connection show | grep zoompi-ap
+```
+
+Timing: the watchdog makes its first attempt about 10 seconds after the
+service starts, and the unit itself waits 8 seconds for USB audio. Allow
+roughly 30 seconds after boot before concluding the AP failed.
+
 ### Web interface is unreachable but recording continues
 
 This is the system working as designed. Recording does not depend on the
