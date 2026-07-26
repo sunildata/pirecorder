@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>pirecoder — Architecture</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3350;
+      --accent: #6c8ef7;
+      --accent2: #a78bfa;
+      --green: #34d399;
+      --orange: #fb923c;
+      --red: #f87171;
+      --yellow: #fbbf24;
+      --text: #e2e8f0;
+      --muted: #8892b0;
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      padding: 32px 20px 64px;
+    }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin-bottom: 40px;
+      font-size: 14px;
+    }
+
+    .container { max-width: 1100px; margin: 0 auto; }
+
+    /* ── Section titles ─────────────────────────────────────────── */
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── Cards ──────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 24px;
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ── File tree ──────────────────────────────────────────────── */
+    .tree {
+      font-family: 'Consolas', 'Cascadia Code', monospace;
+      font-size: 13px;
+      line-height: 2;
+    }
+    .tree-item { display: flex; align-items: center; gap: 8px; }
+    .tree-item .icon { font-size: 15px; }
+    .tree-item .name { color: var(--text); }
+    .tree-item .desc { color: var(--muted); font-size: 12px; margin-left: 6px; }
+    .tree-item.dir .name { color: var(--accent); font-weight: 600; }
+    .tree-item.runtime .name { color: var(--muted); font-style: italic; }
+    .indent { padding-left: 28px; }
+    .indent2 { padding-left: 56px; }
+
+    /* ── Flow diagram ───────────────────────────────────────────── */
+    .flow {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      align-items: flex-start;
+    }
+
+    .flow-row {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      width: 100%;
+    }
+
+    .flow-box {
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 18px;
+      min-width: 160px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .flow-box.browser { border-color: var(--accent); color: var(--accent); }
+    .flow-box.flask   { border-color: var(--green);  color: var(--green);  background: #0f271e; }
+    .flow-box.thread  { border-color: var(--orange); color: var(--orange); background: #261a0f; }
+    .flow-box.mic     { border-color: var(--yellow); color: var(--yellow); background: #261e0f; }
+    .flow-box.disk    { border-color: var(--red);    color: var(--red);    background: #261010; }
+    .flow-box.ws      { border-color: var(--accent2);color: var(--accent2);background: #1a1327; }
+
+    .flow-box .sub { font-size: 11px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+
+    .arrow {
+      color: var(--muted);
+      font-size: 20px;
+      padding: 0 10px;
+      flex-shrink: 0;
+    }
+
+    .flow-col { display: flex; flex-direction: column; align-items: center; gap: 0; }
+    .arrow-down { color: var(--muted); font-size: 20px; padding: 4px 0; text-align: center; }
+
+    /* ── Two-column layout ──────────────────────────────────────── */
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+
+    /* ── API table ──────────────────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    thead tr { border-bottom: 1px solid var(--border); }
+    th {
+      text-align: left;
+      padding: 8px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--surface2); }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: monospace;
+    }
+    .badge.get    { background: #0c2d4a; color: #60c8ff; }
+    .badge.post   { background: #0c3322; color: #34d399; }
+    .badge.delete { background: #3a1010; color: #f87171; }
+    .badge.ws     { background: #1e1040; color: #a78bfa; }
+
+    code {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      color: var(--accent2);
+    }
+
+    /* ── State block ─────────────────────────────────────────────── */
+    .state-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .state-item {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .state-item .key { font-family: monospace; font-size: 12px; color: var(--accent); }
+    .state-item .val { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    /* ── Tech pills ──────────────────────────────────────────────── */
+    .pills { display: flex; flex-wrap: wrap; gap: 10px; }
+    .pill {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+    }
+    .pill .pname { font-weight: 600; color: var(--text); }
+    .pill .pver  { font-size: 11px; color: var(--muted); }
+
+    /* ── Audio settings ──────────────────────────────────────────── */
+    .audio-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+    }
+    .audio-item {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      text-align: center;
+    }
+    .audio-item .aval { font-size: 18px; font-weight: 700; color: var(--yellow); }
+    .audio-item .alabel { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+    /* ── Channel toggle ──────────────────────────────────────────── */
+    .channel-section {
+      margin-top: 20px;
+      border-top: 1px solid var(--border);
+      padding-top: 18px;
+    }
+    .channel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .channel-header-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .toggle-wrap {
+      display: flex;
+      align-items: center;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 30px;
+      padding: 4px;
+      gap: 4px;
+    }
+    .toggle-btn {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 18px;
+      border-radius: 24px;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+      font-family: inherit;
+    }
+    .toggle-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .toggle-btn:not(.active):hover { color: var(--text); }
+
+    .channel-compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    @media (max-width: 500px) { .channel-compare { grid-template-columns: 1fr; } }
+
+    .ch-card {
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      transition: border-color 0.2s, background 0.2s;
+      opacity: 0.45;
+    }
+    .ch-card.selected {
+      opacity: 1;
+      border-color: var(--accent);
+      background: #141829;
+    }
+    .ch-card .ch-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .ch-card .ch-title .ch-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: var(--accent);
+      color: #fff;
+    }
+    .ch-card table { font-size: 12px; width: 100%; }
+    .ch-card td { padding: 5px 6px; border: none; color: var(--muted); }
+    .ch-card td:first-child { color: var(--text); font-weight: 600; white-space: nowrap; }
+    .ch-card tr:hover td { background: transparent; }
+
+    .ch-note {
+      margin-top: 14px;
+      background: var(--surface2);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 6px 6px 0;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: var(--muted);
+      display: none;
+    }
+    .ch-note.visible { display: block; }
+
+    /* ── Lifecycle steps ─────────────────────────────────────────── */
+    .steps { display: flex; flex-direction: column; gap: 0; }
+    .step {
+      display: flex;
+      gap: 14px;
+      position: relative;
+    }
+    .step-num {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+      position: relative;
+      z-index: 1;
+    }
+    .step-line {
+      position: absolute;
+      left: 12px;
+      top: 28px;
+      bottom: -8px;
+      width: 2px;
+      background: var(--border);
+      z-index: 0;
+    }
+    .step:last-child .step-line { display: none; }
+    .step-body { padding-bottom: 20px; }
+    .step-body .stitle { font-weight: 600; font-size: 13px; }
+    .step-body .sdesc { color: var(--muted); font-size: 12px; margin-top: 3px; }
+
+    /* ── Constraints ─────────────────────────────────────────────── */
+    .constraint-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .constraint-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 13px;
+    }
+    .constraint-list li .icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+
+    /* ── Diagram container ───────────────────────────────────────── */
+    .diagram-wrap {
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .diagram {
+      min-width: 640px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 8px 0;
+    }
+    .diagram-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .diagram-branch {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .diagram-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      max-width: 120px;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <h1>pirecoder</h1>
+  <p class="subtitle">Raspberry Pi Audio Recorder — Architecture Reference</p>
+
+  <!-- ── 1. File Structure ─────────────────────────────────────── -->
+  <div class="section-title">1 · File Structure</div>
+  <div class="card">
+    <div class="tree">
+      <div class="tree-item dir"><span class="icon">📁</span><span class="name">pirecorder/</span><span class="desc">git repo root</span></div>
+      <div class="indent">
+        <div class="tree-item dir"><span class="icon">📁</span><span class="name">pirecoder/</span><span class="desc">workspace</span></div>
+        <div class="indent">
+          <div class="tree-item"><span class="icon">🐍</span><span class="name">app.py</span><span class="desc">entire backend — Flask + SocketIO + PyAudio (176 lines)</span></div>
+          <div class="tree-item"><span class="icon">📄</span><span class="name">requirements.txt</span><span class="desc">4 pinned dependencies</span></div>
+          <div class="tree-item"><span class="icon">📄</span><span class="name">README.md</span><span class="desc">Pi setup, ALSA config, systemd service</span></div>
+          <div class="tree-item"><span class="icon">⚖️</span><span class="name">LICENSE</span><span class="desc">GPL v3</span></div>
+          <div class="tree-item dir"><span class="icon">📁</span><span class="name">templates/</span></div>
+          <div class="indent">
+            <div class="tree-item"><span class="icon">🌐</span><span class="name">index.html</span><span class="desc">full UI — HTML + CSS + JS, no build step</span></div>
+          </div>
+          <div class="tree-item runtime"><span class="icon">💾</span><span class="name">recordings/</span><span class="desc">created at runtime — stores *.wav files</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 2. System Diagram ─────────────────────────────────────── -->
+  <div class="section-title">2 · System Diagram</div>
+  <div class="card">
+    <div class="diagram-wrap">
+      <div class="diagram">
+
+        <!-- Row 1: Browser -->
+        <div class="diagram-row">
+          <div class="flow-box browser">
+            📱 Phone / Browser
+            <div class="sub">index.html · Socket.IO client</div>
+          </div>
+        </div>
+
+        <!-- Arrow down -->
+        <div class="diagram-row">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:0;color:var(--muted);font-size:12px;">
+            <span style="color:var(--accent);">↕</span>
+            <span>HTTP REST + WebSocket</span>
+            <span style="font-size:11px;">Wi-Fi LAN</span>
+          </div>
+        </div>
+
+        <!-- Row 2: Flask server -->
+        <div class="diagram-row">
+          <div class="flow-box flask" style="min-width:340px;">
+            🟢 Flask + SocketIO — app.py
+            <div class="sub">host 0.0.0.0 · port 5000 · eventlet</div>
+          </div>
+        </div>
+
+        <!-- Three branches -->
+        <div class="diagram-row" style="align-items:flex-start;justify-content:center;gap:32px;">
+
+          <!-- Branch A: REST routes -->
+          <div class="diagram-branch">
+            <span style="color:var(--muted);font-size:18px;">↓</span>
+            <div class="flow-box" style="min-width:160px;font-size:12px;">
+              🗺 REST Routes
+              <div class="sub">/api/start · /api/stop<br>/api/recordings · /api/download<br>/api/delete · /api/status</div>
+            </div>
+          </div>
+
+          <!-- Branch B: Record thread -->
+          <div class="diagram-branch">
+            <span style="color:var(--muted);font-size:18px;">↓</span>
+            <div class="flow-box thread" style="min-width:160px;font-size:12px;">
+              🧵 Daemon Thread
+              <div class="sub">_recording_worker()<br>_frames[] buffer in RAM</div>
+            </div>
+            <span style="color:var(--muted);font-size:18px;">↓</span>
+            <div class="flow-box mic" style="min-width:160px;font-size:12px;">
+              🎤 PyAudio / ALSA
+              <div class="sub">reads CHUNK=1024 PCM<br>44.1 kHz · 16-bit · mono</div>
+            </div>
+            <span style="color:var(--muted);font-size:18px;">↓ on stop</span>
+            <div class="flow-box disk" style="min-width:160px;font-size:12px;">
+              💾 recordings/*.wav
+              <div class="sub">wave module writes frames</div>
+            </div>
+          </div>
+
+          <!-- Branch C: WebSocket -->
+          <div class="diagram-branch">
+            <span style="color:var(--muted);font-size:18px;">↓</span>
+            <div class="flow-box ws" style="min-width:160px;font-size:12px;">
+              ⚡ Socket.IO
+              <div class="sub">emits "status" event<br>multi-device live sync</div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 3. Audio Config ───────────────────────────────────────── -->
+  <div class="section-title">3 · Audio Configuration</div>
+  <div class="card">
+    <div class="audio-grid">
+      <div class="audio-item"><div class="aval">44 100</div><div class="alabel">Sample Rate (Hz)</div></div>
+      <div class="audio-item"><div class="aval">16-bit</div><div class="alabel">Format (paInt16)</div></div>
+      <div class="audio-item" id="ch-tile">
+        <div class="aval" id="ch-tile-val">1</div>
+        <div class="alabel" id="ch-tile-label">Channel — Mono</div>
+      </div>
+      <div class="audio-item"><div class="aval">1 024</div><div class="alabel">Chunk Size (frames)</div></div>
+      <div class="audio-item"><div class="aval">WAV</div><div class="alabel">Output Format</div></div>
+      <div class="audio-item"><div class="aval">RAM</div><div class="alabel">Buffer (_frames[])</div></div>
+    </div>
+
+    <!-- Mono / Stereo comparison -->
+    <div class="channel-section">
+      <div class="channel-header">
+        <span class="channel-header-label">Channel Mode</span>
+        <div class="toggle-wrap">
+          <button class="toggle-btn active" id="btn-mono" onclick="selectChannel('mono')">🎙 Mono</button>
+          <button class="toggle-btn" id="btn-stereo" onclick="selectChannel('stereo')">🎧 Stereo</button>
+        </div>
+      </div>
+
+      <div class="channel-compare">
+        <!-- Mono card -->
+        <div class="ch-card selected" id="card-mono">
+          <div class="ch-title">🎙 Mono <span class="ch-badge" id="badge-mono">Current</span></div>
+          <table>
+            <tr><td>CHANNELS</td><td><code>1</code></td></tr>
+            <tr><td>app.py line</td><td><code>CHANNELS = 1</code></td></tr>
+            <tr><td>Bit rate</td><td>~705 kbps</td></tr>
+            <tr><td>File size / min</td><td>~5.3 MB</td></tr>
+            <tr><td>CPU load</td><td>Lower</td></tr>
+            <tr><td>Best for</td><td>Voice, speech, lectures</td></tr>
+            <tr><td>Mic requirement</td><td>Single mic input</td></tr>
+          </table>
+        </div>
+
+        <!-- Stereo card -->
+        <div class="ch-card" id="card-stereo">
+          <div class="ch-title">🎧 Stereo <span class="ch-badge" style="background:var(--accent2);" id="badge-stereo">Option</span></div>
+          <table>
+            <tr><td>CHANNELS</td><td><code>2</code></td></tr>
+            <tr><td>app.py line</td><td><code>CHANNELS = 2</code></td></tr>
+            <tr><td>Bit rate</td><td>~1 411 kbps</td></tr>
+            <tr><td>File size / min</td><td>~10.6 MB</td></tr>
+            <tr><td>CPU load</td><td>Slightly higher</td></tr>
+            <tr><td>Best for</td><td>Music, room ambience</td></tr>
+            <tr><td>Mic requirement</td><td>Stereo mic / dual-input</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- Note shown when stereo is selected -->
+      <div class="ch-note" id="stereo-note">
+        <strong>To switch to Stereo in app.py:</strong> change <code>CHANNELS = 1</code> → <code>CHANNELS = 2</code> on line 22.
+        Ensure your microphone hardware and ALSA device support two-channel input, otherwise PyAudio will raise an error on stream open.
+      </div>
+      <!-- Note shown when mono is selected -->
+      <div class="ch-note visible" id="mono-note">
+        <strong>Current setting (Mono):</strong> <code>CHANNELS = 1</code> on line 22 of app.py.
+        Ideal for the Raspberry Pi's onboard or USB mono mic. Half the file size vs Stereo with no quality loss for voice recordings.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 4. Shared State ───────────────────────────────────────── -->
+  <div class="section-title">4 · Shared State (in-process)</div>
+  <div class="card">
+    <div class="state-grid">
+      <div class="state-item"><div class="key">state["is_recording"]</div><div class="val">bool — gates /api/start (400 if True)</div></div>
+      <div class="state-item"><div class="key">state["current_file"]</div><div class="val">str — active WAV filename</div></div>
+      <div class="state-item"><div class="key">state["start_time"]</div><div class="val">float — time.time() snapshot</div></div>
+      <div class="state-item"><div class="key">state["duration"]</div><div class="val">int — seconds elapsed, emitted via WS</div></div>
+      <div class="state-item"><div class="key">_frames[]</div><div class="val">list of PCM byte chunks, flushed to WAV on stop</div></div>
+      <div class="state-item"><div class="key">_stop_event</div><div class="val">threading.Event — signals worker to exit</div></div>
+    </div>
+  </div>
+
+  <!-- ── 5. API Surface ────────────────────────────────────────── -->
+  <div class="section-title">5 · API Surface</div>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Method</th>
+          <th>Path</th>
+          <th>Purpose</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="badge get">GET</span></td>
+          <td><code>/</code></td>
+          <td>Serve UI</td>
+          <td>Renders <code>index.html</code> via Flask template</td>
+        </tr>
+        <tr>
+          <td><span class="badge get">GET</span></td>
+          <td><code>/api/status</code></td>
+          <td>Polling status</td>
+          <td>Returns <code>is_recording</code>, <code>current_file</code>, <code>duration</code></td>
+        </tr>
+        <tr>
+          <td><span class="badge post">POST</span></td>
+          <td><code>/api/start</code></td>
+          <td>Start recording</td>
+          <td>JSON body: <code>{ "label": "..." }</code> (optional) · 400 if already recording</td>
+        </tr>
+        <tr>
+          <td><span class="badge post">POST</span></td>
+          <td><code>/api/stop</code></td>
+          <td>Stop &amp; save WAV</td>
+          <td>Signals thread, joins (5 s timeout), writes WAV · 400 if not recording</td>
+        </tr>
+        <tr>
+          <td><span class="badge get">GET</span></td>
+          <td><code>/api/recordings</code></td>
+          <td>List files</td>
+          <td>Returns array of <code>{ name, size_kb }</code>, sorted newest-first</td>
+        </tr>
+        <tr>
+          <td><span class="badge get">GET</span></td>
+          <td><code>/api/download/&lt;filename&gt;</code></td>
+          <td>Download WAV</td>
+          <td>Sent as attachment · 404 if missing</td>
+        </tr>
+        <tr>
+          <td><span class="badge delete">DELETE</span></td>
+          <td><code>/api/delete/&lt;filename&gt;</code></td>
+          <td>Delete WAV</td>
+          <td>Unlinks file · 404 if missing</td>
+        </tr>
+        <tr>
+          <td><span class="badge ws">WS</span></td>
+          <td><code>status</code> event</td>
+          <td>Live push</td>
+          <td>Emitted on connect, start, stop, and each chunk read in worker</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── 6. Recording Lifecycle ────────────────────────────────── -->
+  <div class="section-title">6 · Recording Lifecycle</div>
+  <div class="grid2">
+    <div class="card">
+      <div class="card-title">▶ Start Pipeline</div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div><div class="step-line"></div>
+          <div class="step-body"><div class="stitle">Browser opens UI</div><div class="sdesc">GET / → index.html rendered · Socket.IO connects → server emits current status</div></div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div><div class="step-line"></div>
+          <div class="step-body"><div class="stitle">User taps Start</div><div class="sdesc">POST /api/start with optional <code>label</code> JSON</div></div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div><div class="step-line"></div>
+          <div class="step-body"><div class="stitle">Filename created</div><div class="sdesc"><code>YYYYMMDD_HHMMSS[_label].wav</code> — state updated</div></div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div><div class="step-line"></div>
+          <div class="step-body"><div class="stitle">Daemon thread starts</div><div class="sdesc">PyAudio opens mic stream · reads 1024-frame chunks · appends to <code>_frames[]</code></div></div>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div><div class="step-line"></div>
+          <div class="step-body"><div class="stitle">Live status broadcast</div><div class="sdesc">Worker emits <code>status</code> each chunk iteration · all connected clients see live timer</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">⏹ Stop Pipeline</div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div><div class="step-line"></div>
+          <div class="step-body"><div class="stitle">User taps Stop</div><div class="sdesc">POST /api/stop received</div></div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div><div class="step-line"></div>
+          <div class="step-body"><div class="stitle">Signal thread</div><div class="sdesc"><code>_stop_event.set()</code> · <code>_record_thread.join(timeout=5)</code></div></div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div><div class="step-line"></div>
+          <div class="step-body"><div class="stitle">WAV written to disk</div><div class="sdesc"><code>wave.open()</code> · writes all <code>_frames[]</code> · stream closed · PyAudio terminated</div></div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div><div class="step-line"></div>
+          <div class="step-body"><div class="stitle">State reset</div><div class="sdesc"><code>is_recording=False</code> · all state fields cleared</div></div>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div><div class="step-line"></div>
+          <div class="step-body"><div class="stitle">Broadcast &amp; refresh</div><div class="sdesc">Socket.IO emits idle status · UI toasts filename · recordings list reloads</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 7. Tech Stack ─────────────────────────────────────────── -->
+  <div class="section-title">7 · Tech Stack</div>
+  <div class="card">
+    <div class="pills">
+      <div class="pill"><span class="pname">Flask</span><span class="pver">3.0.3 · HTTP server + templating</span></div>
+      <div class="pill"><span class="pname">Flask-SocketIO</span><span class="pver">5.3.6 · WebSocket real-time sync</span></div>
+      <div class="pill"><span class="pname">eventlet</span><span class="pver">0.36.1 · async networking backend</span></div>
+      <div class="pill"><span class="pname">PyAudio</span><span class="pver">0.2.14 · microphone capture</span></div>
+      <div class="pill"><span class="pname">wave</span><span class="pver">stdlib · WAV file encoding</span></div>
+      <div class="pill"><span class="pname">threading</span><span class="pver">stdlib · non-blocking capture loop</span></div>
+      <div class="pill"><span class="pname">Socket.IO client</span><span class="pver">4.7.5 · CDN · browser WS</span></div>
+      <div class="pill"><span class="pname">PortAudio / ALSA</span><span class="pver">system · OS audio stack on Pi</span></div>
+    </div>
+  </div>
+
+  <!-- ── 8. Design Constraints ─────────────────────────────────── -->
+  <div class="section-title">8 · Design Constraints</div>
+  <div class="card">
+    <ul class="constraint-list">
+      <li><span class="icon">🔒</span><span>No auth — designed for trusted LAN use only; <code>cors_allowed_origins="*"</code></span></li>
+      <li><span class="icon">1️⃣</span><span>One recording session at a time — <code>/api/start</code> returns <strong>400</strong> if <code>is_recording=True</code></span></li>
+      <li><span class="icon">💾</span><span>In-memory buffer — all PCM frames held in <code>_frames[]</code> until stop; no streaming to disk mid-recording</span></li>
+      <li><span class="icon">🗄</span><span>No database — recordings are plain files in <code>recordings/</code>; inventory is a live directory scan</span></li>
+      <li><span class="icon">⚙️</span><span>No build tooling — frontend is a single <code>.html</code> template; no npm, webpack, or transpilation</span></li>
+      <li><span class="icon">🔑</span><span>Hardcoded <code>SECRET_KEY</code> — fine for LAN, must be changed for any public deployment</span></li>
+    </ul>
+  </div>
+
+  <!-- ── 9. Entry Point ────────────────────────────────────────── -->
+  <div class="section-title">9 · Entry Point &amp; Deployment</div>
+  <div class="card">
+    <div style="font-size:13px;line-height:2;">
+      <div><strong>Run:</strong> <code>python app.py</code> (venv activated, project directory)</div>
+      <div><strong>Binds:</strong> <code>0.0.0.0:5000</code> — all interfaces, reachable from LAN phones</div>
+      <div><strong>Production:</strong> <code>debug=False</code> (line 176)</div>
+      <div><strong>Autostart:</strong> optional <code>/etc/systemd/system/audio-recorder.service</code> unit for boot start on Pi</div>
+      <div><strong>ALSA device:</strong> configure default mic in <code>~/.asoundrc</code></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function selectChannel(mode) {
+    const isMono = mode === 'mono';
+
+    document.getElementById('btn-mono').classList.toggle('active', isMono);
+    document.getElementById('btn-stereo').classList.toggle('active', !isMono);
+
+    document.getElementById('card-mono').classList.toggle('selected', isMono);
+    document.getElementById('card-stereo').classList.toggle('selected', !isMono);
+
+    document.getElementById('mono-note').classList.toggle('visible', isMono);
+    document.getElementById('stereo-note').classList.toggle('visible', !isMono);
+
+    // Update the summary tile
+    document.getElementById('ch-tile-val').textContent = isMono ? '1' : '2';
+    document.getElementById('ch-tile-label').textContent = isMono ? 'Channel — Mono' : 'Channels — Stereo';
+  }
+</script>
+</body>
+</html>
