@@ -53,118 +53,117 @@
     waveformClear();
   }
 
-  /* ── Waveform oscilloscope ───────────────────────────────────────────── */
+  /* ── Waveform oscilloscope (ring-buffer, full-redraw) ───────────────── */
+  //
+  // Ring buffer stores the last WF_BUF samples (oldest→newest).
+  // Every levels frame, new points are written in; the whole canvas is
+  // redrawn from left→right mapping oldest→newest.  No drawImage tricks,
+  // so DPR scaling is never an issue.
 
   const wfCanvas = $('waveform');
-  const wfCtx = wfCanvas ? wfCanvas.getContext('2d') : null;
-  // Pixels scrolled left each time new data arrives (10 Hz → 40px/frame ≈ 400px/s)
-  const WF_SCROLL = 40;
-  // CSS colours matching app.css design tokens
-  const WF_BG    = '#0e1219';
-  const WF_LINE  = '#4f8cff';
-  const WF_GRID  = '#1c2230';
-  const WF_ZERO  = '#2a3242';
+  const wfCtx    = wfCanvas ? wfCanvas.getContext('2d') : null;
+  const WF_BUF   = 800;          // ~10 frames × 80 pts = 1 second visible
+  const wfBuf    = new Float32Array(WF_BUF);
+  let   wfHead   = 0;            // next write slot (mod WF_BUF)
+
+  const WF_BG   = '#0e1219';
+  const WF_LINE = '#4f8cff';
+  const WF_GRID = '#1c2230';
+  const WF_ZERO = '#2a3242';
 
   function waveformResize() {
     if (!wfCanvas || !wfCtx) return;
-    const dpr = window.devicePixelRatio || 1;
     const cssW = wfCanvas.clientWidth;
     const cssH = wfCanvas.clientHeight;
-    if (!cssW) return;
-    wfCanvas.width  = cssW * dpr;
-    wfCanvas.height = cssH * dpr;
-    wfCtx.scale(dpr, dpr);
-    waveformDrawGrid(cssW, cssH);
+    if (!cssW || !cssH) return;
+    const dpr = window.devicePixelRatio || 1;
+    const pw = Math.floor(cssW * dpr);
+    const ph = Math.floor(cssH * dpr);
+    if (wfCanvas.width === pw && wfCanvas.height === ph) return;
+    wfCanvas.width  = pw;
+    wfCanvas.height = ph;
+    wfCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    waveformDraw();
   }
 
-  function waveformDrawGrid(w, h) {
-    if (!wfCtx) return;
-    wfCtx.fillStyle = WF_BG;
-    wfCtx.fillRect(0, 0, w, h);
-    // Horizontal centre line
-    wfCtx.strokeStyle = WF_ZERO;
-    wfCtx.lineWidth = 1;
-    wfCtx.beginPath();
-    wfCtx.moveTo(0, h / 2);
-    wfCtx.lineTo(w, h / 2);
-    wfCtx.stroke();
-    // ±50% guide lines
-    wfCtx.strokeStyle = WF_GRID;
-    [0.25, 0.75].forEach((frac) => {
-      wfCtx.beginPath();
-      wfCtx.moveTo(0, h * frac);
-      wfCtx.lineTo(w, h * frac);
-      wfCtx.stroke();
-    });
-  }
-
-  function waveformClear() {
+  function waveformDraw() {
     if (!wfCtx || !wfCanvas) return;
     const dpr = window.devicePixelRatio || 1;
-    waveformDrawGrid(wfCanvas.width / dpr, wfCanvas.height / dpr);
+    const W   = wfCanvas.width  / dpr;
+    const H   = wfCanvas.height / dpr;
+    const mid = H / 2;
+
+    // Background
+    wfCtx.fillStyle = WF_BG;
+    wfCtx.fillRect(0, 0, W, H);
+
+    // Grid lines
+    wfCtx.lineWidth = 1;
+    [[WF_ZERO, mid], [WF_GRID, H * 0.25], [WF_GRID, H * 0.75]].forEach(([col, y]) => {
+      wfCtx.strokeStyle = col;
+      wfCtx.beginPath(); wfCtx.moveTo(0, y); wfCtx.lineTo(W, y); wfCtx.stroke();
+    });
+
+    // Waveform: map ring buffer oldest→newest to left→right
+    wfCtx.strokeStyle = WF_LINE;
+    wfCtx.lineWidth   = 1.5;
+    wfCtx.lineJoin    = 'round';
+    wfCtx.beginPath();
+    for (let i = 0; i < WF_BUF; i++) {
+      const v = wfBuf[(wfHead + i) % WF_BUF];
+      const x = (i / (WF_BUF - 1)) * W;
+      const y = mid - v * mid * 0.88;
+      i === 0 ? wfCtx.moveTo(x, y) : wfCtx.lineTo(x, y);
+    }
+    wfCtx.stroke();
   }
 
   function waveformPush(points) {
-    if (!wfCtx || !wfCanvas || !points.length) return;
-    const dpr = window.devicePixelRatio || 1;
-    const W = wfCanvas.width  / dpr;
-    const H = wfCanvas.height / dpr;
-    const mid = H / 2;
-
-    // Shift existing content left by WF_SCROLL pixels
-    wfCtx.drawImage(wfCanvas, -WF_SCROLL * dpr, 0, wfCanvas.width, wfCanvas.height,
-                              0, 0, wfCanvas.width, wfCanvas.height);
-
-    // Clear the right strip (accounting for DPR artefacts)
-    wfCtx.fillStyle = WF_BG;
-    wfCtx.fillRect(W - WF_SCROLL - 1, 0, WF_SCROLL + 1, H);
-
-    // Redraw grid lines in the new strip
-    wfCtx.strokeStyle = WF_ZERO;
-    wfCtx.lineWidth = 1;
-    wfCtx.beginPath();
-    wfCtx.moveTo(W - WF_SCROLL, mid);
-    wfCtx.lineTo(W, mid);
-    wfCtx.stroke();
-    wfCtx.strokeStyle = WF_GRID;
-    [0.25, 0.75].forEach((frac) => {
-      wfCtx.beginPath();
-      wfCtx.moveTo(W - WF_SCROLL, H * frac);
-      wfCtx.lineTo(W, H * frac);
-      wfCtx.stroke();
-    });
-
-    // Draw new waveform samples in the right strip
-    wfCtx.strokeStyle = WF_LINE;
-    wfCtx.lineWidth = 1.5;
-    wfCtx.lineJoin = 'round';
-    wfCtx.beginPath();
-    const xStep = WF_SCROLL / (points.length - 1 || 1);
-    points.forEach((v, i) => {
-      const x = W - WF_SCROLL + i * xStep;
-      const y = mid - v * mid * 0.88;
-      i === 0 ? wfCtx.moveTo(x, y) : wfCtx.lineTo(x, y);
-    });
-    wfCtx.stroke();
+    if (!points || !points.length) return;
+    for (const v of points) {
+      wfBuf[wfHead] = v;
+      wfHead = (wfHead + 1) % WF_BUF;
+    }
+    waveformDraw();
   }
 
-  window.addEventListener('resize', waveformResize);
-  // Defer until layout is complete so clientWidth is non-zero
-  setTimeout(waveformResize, 0);
+  function waveformClear() {
+    wfBuf.fill(0);
+    wfHead = 0;
+    waveformDraw();
+  }
+
+  // Use ResizeObserver when available — it fires reliably after layout.
+  if (wfCanvas) {
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(waveformResize).observe(wfCanvas);
+    } else {
+      window.addEventListener('resize', waveformResize);
+    }
+    // First paint: try immediately, then again after one frame in case CSS
+    // hasn't finished calculating the card width yet.
+    waveformResize();
+    requestAnimationFrame(waveformResize);
+  }
 
   /* ── Transport state ─────────────────────────────────────────────────── */
 
   function applyStatus(s) {
     if (!s) return;
     state = s;
-    const rec = s.is_recording;
+    const rec    = s.is_recording;
     const paused = s.is_paused;
+
+    // When recording starts, the backend kills the monitor automatically;
+    // update the UI to match.
+    if (rec && monitorActive) applyMonitorUi(false);
 
     el.record.disabled = rec && !paused;
     el.pause.disabled = !rec;
     el.stop.disabled = !rec;
     el.marker.disabled = !rec || paused;
     el.label.disabled = rec;
+    if (btnMonitor) btnMonitor.disabled = rec;
 
     el.pause.textContent = paused ? 'Resume' : 'Pause';
     el.record.textContent = paused ? 'Resume' : 'Record';
@@ -327,6 +326,37 @@
     await ZP.api('/levels/reset-clip', { method: 'POST' });
     el.clip.classList.remove('on');
   }));
+
+  /* ── Monitor toggle ──────────────────────────────────────────────────── */
+
+  let monitorActive = false;
+  const btnMonitor = $('btn-monitor');
+
+  function applyMonitorUi(active) {
+    monitorActive = active;
+    if (!btnMonitor) return;
+    btnMonitor.textContent = active ? 'Stop Monitor' : 'Monitor';
+    btnMonitor.classList.toggle('btn-rec', active);
+    btnMonitor.classList.toggle('btn-ghost', !active);
+  }
+
+  if (btnMonitor) {
+    btnMonitor.addEventListener('click', () => guard(async () => {
+      if (state.is_recording) {
+        ZP.toast('Cannot monitor while recording', 'error');
+        return;
+      }
+      const next = !monitorActive;
+      await ZP.api('/monitor', { method: 'POST', body: { active: next } });
+      applyMonitorUi(next);
+      if (next) {
+        ZP.toast('Monitoring input…', 'ok');
+      } else {
+        ZP.toast('Monitor stopped', '');
+        waveformClear();
+      }
+    }));
+  }
 
   /* ── Input Gain control ──────────────────────────────────────────────── */
 

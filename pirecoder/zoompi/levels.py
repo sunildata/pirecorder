@@ -7,17 +7,26 @@ of the GIL, which the reliability requirement rules out.
 
 The cost is roughly one small pread per poll; on a Pi 3 that is well under
 1% CPU at 10 Hz.
+
+In idle mode (not recording) an optional _MonitorCapture can run a separate
+short-lived `arecord` so that VU meters and the waveform stay live for gain
+setting and sound-check without writing to the recordings folder.
 """
 
 from __future__ import annotations
 
+import logging
 import math
 import os
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 from array import array
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 WAV_HEADER_SIZE = 44
 CLIP_THRESHOLD = 0.99      # fraction of full scale counted as clipping
@@ -29,6 +38,12 @@ SILENCE_DBFS = -90.0
 # meter and keeps the cost flat regardless of sample rate.
 RMS_SAMPLE_TARGET = 1200
 
+# Monitor capture defaults (used when the interface hasn't been probed yet).
+_MON_RATE     = 48000
+_MON_DEPTH    = 16
+_MON_CHANNELS = 2
+_MON_FMT      = "S16_LE"
+
 
 def _to_dbfs(amplitude: float) -> float:
     """Linear 0..1 amplitude to dBFS, floored at SILENCE_DBFS."""
@@ -37,8 +52,58 @@ def _to_dbfs(amplitude: float) -> float:
     return max(SILENCE_DBFS, 20.0 * math.log10(min(1.0, amplitude)))
 
 
+class _MonitorCapture:
+    """A short-lived `arecord` subprocess that writes to a temp WAV file.
+
+    The LevelMeter reads its tail exactly like a real recording segment, so
+    VU meters and the waveform stay live while the recorder is idle.
+
+    The temp file is deleted when stop() is called.  arecord appends
+    indefinitely; we never need to seek to the front so the WAV header
+    being stale is fine — _read_tail() only touches the last few KB.
+    """
+
+    def __init__(self, alsa_id: str, rate: int, depth: int, channels: int) -> None:
+        self.rate     = rate
+        self.depth    = depth
+        self.channels = channels
+        fmt = {16: "S16_LE", 24: "S24_3LE", 32: "S32_LE"}.get(depth, "S16_LE")
+        fd, tmp = tempfile.mkstemp(suffix=".wav", prefix="zoompi_mon_")
+        os.close(fd)
+        self._path = Path(tmp)
+        try:
+            self._proc: subprocess.Popen | None = subprocess.Popen(
+                ["arecord", "-D", alsa_id, "-f", fmt,
+                 "-r", str(rate), "-c", str(channels), str(self._path)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            log.warning("Monitor capture failed to start: %s", exc)
+            self._proc = None
+            self._path.unlink(missing_ok=True)
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    @property
+    def alive(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
+    def stop(self) -> None:
+        if self._proc and self._proc.poll() is None:
+            try:
+                self._proc.terminate()
+                self._proc.wait(timeout=2)
+            except Exception:
+                pass
+        self._path.unlink(missing_ok=True)
+
+
 class LevelMeter:
-    """Polls the active recording file and publishes RMS/peak per channel."""
+    """Polls the active recording file (or a monitor capture) and publishes
+    RMS/peak per channel plus a waveform snapshot."""
 
     def __init__(self, recorder, poll_hz: float = 10.0) -> None:
         self._recorder = recorder
@@ -51,6 +116,9 @@ class LevelMeter:
         self._peak_hold = [0.0, 0.0]
         self._peak_hold_at = [0.0, 0.0]
         self._clip_latched = [False, False]
+
+        self._monitor: _MonitorCapture | None = None
+        self._monitoring_enabled = False   # set by start_monitor() / stop_monitor()
 
     @staticmethod
     def _empty() -> dict:
@@ -74,6 +142,7 @@ class LevelMeter:
 
     def stop(self) -> None:
         self._stop.set()
+        self._kill_monitor()
 
     def read(self) -> dict:
         with self._lock:
@@ -83,7 +152,29 @@ class LevelMeter:
         with self._lock:
             self._clip_latched = [False, False]
 
+    def start_monitor(self, alsa_id: str,
+                      rate: int = _MON_RATE,
+                      depth: int = _MON_DEPTH,
+                      channels: int = _MON_CHANNELS) -> None:
+        """Enable idle monitoring.  The capture starts on the next _sample() poll
+        so we are certain no recording arecord is competing for the device."""
+        self._kill_monitor()
+        self._monitor_params = (alsa_id, rate, depth, channels)
+        self._monitoring_enabled = True
+
+    def stop_monitor(self) -> None:
+        """Disable idle monitoring and tear down any running capture."""
+        self._monitoring_enabled = False
+        self._kill_monitor()
+        with self._lock:
+            self._levels = self._empty()
+
     # ── Internals ────────────────────────────────────────────────────────────
+
+    def _kill_monitor(self) -> None:
+        if self._monitor:
+            self._monitor.stop()
+            self._monitor = None
 
     def _run(self) -> None:
         while not self._stop.wait(self._interval):
@@ -95,22 +186,54 @@ class LevelMeter:
                     self._levels = self._empty()
 
     def _sample(self) -> None:
-        path = self._recorder.current_segment_path()
-        status = self._recorder.status()
-        session = status.get("session")
+        status   = self._recorder.status()
+        is_rec   = status.get("is_recording")
+        session  = status.get("session")
 
-        if path is None or session is None or not status.get("is_recording"):
+        if is_rec and session:
+            # ── Recording path ──────────────────────────────────────────────
+            # Kill any monitor immediately so the device is free.
+            if self._monitor:
+                self._kill_monitor()
+
+            path     = self._recorder.current_segment_path()
+            channels = int(session["channels"])
+            depth    = int(session["bit_depth"])
+            rate     = int(session["sample_rate"])
+
+        elif self._monitoring_enabled:
+            # ── Idle monitor path ───────────────────────────────────────────
+            if self._monitor is None or not self._monitor.alive:
+                params = getattr(self, "_monitor_params",
+                                 ("default", _MON_RATE, _MON_DEPTH, _MON_CHANNELS))
+                self._monitor = _MonitorCapture(*params)
+                # Give arecord a moment to write the WAV header.
+                time.sleep(0.15)
+
+            if not self._monitor.alive:
+                with self._lock:
+                    self._levels = self._empty()
+                return
+
+            path     = self._monitor.path
+            channels = self._monitor.channels
+            depth    = self._monitor.depth
+            rate     = self._monitor.rate
+
+        else:
+            # ── Truly idle — no monitoring requested ────────────────────────
+            self._kill_monitor()
             with self._lock:
                 self._levels = self._empty()
             return
 
-        channels = int(session["channels"])
-        depth = int(session["bit_depth"])
-        rate = int(session["sample_rate"])
-        width = depth // 8
+        if path is None:
+            with self._lock:
+                self._levels = self._empty()
+            return
 
-        # ~50 ms window, aligned to a whole frame.
-        frame = channels * width
+        width  = depth // 8
+        frame  = channels * width
         window = max(frame, int(rate * 0.05) * frame)
 
         chunk = self._read_tail(path, window, frame)
@@ -118,8 +241,8 @@ class LevelMeter:
             return
 
         peaks, rms = self._analyse(chunk, channels, width)
-        waveform = self._make_waveform(chunk, channels, width)
-        now = time.time()
+        waveform   = self._make_waveform(chunk, channels, width)
+        now        = time.time()
 
         with self._lock:
             for ch in range(2):

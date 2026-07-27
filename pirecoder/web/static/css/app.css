@@ -244,6 +244,14 @@ audio { width: 100%; margin-top: 9px; height: 34px; }
 }
 .offline-badge.show { display: block; }
 
+/* ── Monitor button (active state overrides ghost) ───────────────────── */
+#btn-monitor.btn-rec {
+  background: var(--rec);
+  border-color: var(--rec);
+  color: #fff;
+  animation: pulse 1.4s infinite;
+}
+
 /* ── Waveform oscilloscope ────────────────────────────────────────────── */
 .waveform-canvas {
   display: block;
