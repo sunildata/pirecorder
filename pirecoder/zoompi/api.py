@@ -188,11 +188,17 @@ def reset_clip():
 @api.get("/gain")
 @login_required
 def get_gain():
-    dev = audio_devices.select_device(config.get("audio_device"))
+    # probe=False: fast card lookup, no arecord format tests needed for gain.
+    dev = audio_devices.select_device(config.get("audio_device"), probe=False)
     if not dev:
-        return jsonify({"gain_db": 0, "supported": False})
+        return jsonify({"gain_db": 0, "supported": False, "controls": []})
+    controls = audio_devices.discover_capture_controls(dev)
     gain = audio_devices.get_capture_gain(dev)
-    return jsonify({"gain_db": gain if gain is not None else 0, "supported": gain is not None})
+    return jsonify({
+        "gain_db":  gain if gain is not None else 0,
+        "supported": gain is not None or bool(controls),
+        "controls": [c["name"] for c in controls],
+    })
 
 
 @api.post("/gain")
@@ -206,11 +212,27 @@ def set_gain():
     except (ValueError, TypeError):
         return jsonify({"error": "gain_db must be an integer"}), 400
     gain_db = max(-10, min(40, gain_db))
-    dev = audio_devices.select_device(config.get("audio_device"))
+    dev = audio_devices.select_device(config.get("audio_device"), probe=False)
     if not dev:
         return jsonify({"error": "No audio device found"}), 404
     ok = audio_devices.set_capture_gain(dev, gain_db)
-    return jsonify({"ok": ok, "gain_db": gain_db, "supported": ok})
+    # Read back the actual value so the UI always shows truth.
+    actual = audio_devices.get_capture_gain(dev) if ok else gain_db
+    return jsonify({"ok": ok, "gain_db": actual if actual is not None else gain_db, "supported": ok})
+
+
+@api.get("/gain/controls")
+@login_required
+def gain_controls():
+    """Debug endpoint: lists all capture controls amixer reports for the device."""
+    dev = audio_devices.select_device(config.get("audio_device"), probe=False)
+    if not dev:
+        return jsonify({"error": "No audio device found", "controls": []}), 404
+    return jsonify({
+        "device": dev.name,
+        "card": dev.card,
+        "controls": audio_devices.discover_capture_controls(dev),
+    })
 
 
 # ── Files ────────────────────────────────────────────────────────────────────

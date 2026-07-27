@@ -106,9 +106,13 @@ def list_devices(probe: bool = True) -> list[AudioDevice]:
     return devices
 
 
-def select_device(preferred: str = "auto") -> AudioDevice | None:
-    """Resolve the configured device, preferring a USB interface over onboard."""
-    devices = list_devices(probe=True)
+def select_device(preferred: str = "auto", probe: bool = True) -> AudioDevice | None:
+    """Resolve the configured device, preferring a USB interface over onboard.
+
+    Set probe=False for fast lookups (e.g. gain control) that don't need
+    capability data — avoids the several-second arecord probe round-trip.
+    """
+    devices = list_devices(probe=probe)
     if not devices:
         return None
     if preferred and preferred != "auto":
@@ -137,24 +141,98 @@ def negotiate_format(
     return rate, depth, channels
 
 
-def get_capture_gain(device: AudioDevice) -> int | None:
-    """Read current capture gain in dB. Returns None if the device has no software gain control."""
-    for control in ("Mic", "Capture", "PCM Capture Source", "Digital"):
-        rc, out, _ = _run(["amixer", "-c", str(device.card), "get", control])
-        if rc != 0:
-            continue
-        m = re.search(r"\[([+-]?\d+(?:\.\d+)?)dB\]", out)
+# Common capture control names, ordered most-specific first.
+_CAPTURE_CONTROLS = [
+    "Mic", "Mic Boost", "Mic Gain", "Mic Volume",
+    "Capture", "Capture Volume",
+    "Input", "Input Volume",
+    "ADC", "ADC Level",
+    "Line In", "Line",
+    "PCM Capture Source",
+    "Digital",
+]
+
+
+def _amixer_sset(card: int, control: str, value: str) -> bool:
+    """amixer sset — the correct command for named SimpleControls."""
+    rc, _, _ = _run(["amixer", "-c", str(card), "sset", control, value])
+    return rc == 0
+
+
+def discover_capture_controls(device: AudioDevice) -> list[dict]:
+    """Return all mixer controls on the card that have capture capability.
+
+    Each entry: {"name": str, "db_value": int|None, "pct_value": int|None}
+    """
+    rc, out, _ = _run(["amixer", "-c", str(device.card)])
+    if rc != 0:
+        return []
+
+    controls: list[dict] = []
+    current: dict = {}
+
+    for line in out.splitlines():
+        line = line.strip()
+        m = re.match(r"Simple mixer control '([^']+)',\d+", line)
         if m:
-            return round(float(m.group(1)))
+            if current.get("has_capture"):
+                controls.append({
+                    "name": current["name"],
+                    "db_value":  current.get("db_value"),
+                    "pct_value": current.get("pct_value"),
+                })
+            current = {"name": m.group(1), "has_capture": False}
+        elif current:
+            if "cvolume" in line or "cswitch" in line:
+                current["has_capture"] = True
+            if current.get("has_capture"):
+                db_m = re.search(r"\[([+-]?\d+(?:\.\d+)?)dB\]", line)
+                if db_m and "db_value" not in current:
+                    current["db_value"] = round(float(db_m.group(1)))
+                pct_m = re.search(r"\[(\d+)%\]", line)
+                if pct_m and "pct_value" not in current:
+                    current["pct_value"] = int(pct_m.group(1))
+
+    if current.get("has_capture"):
+        controls.append({
+            "name": current["name"],
+            "db_value":  current.get("db_value"),
+            "pct_value": current.get("pct_value"),
+        })
+
+    return controls
+
+
+def get_capture_gain(device: AudioDevice) -> int | None:
+    """Read current capture gain in dB.  Returns None if no control found."""
+    controls = discover_capture_controls(device)
+    for c in controls:
+        if c.get("db_value") is not None:
+            return c["db_value"]
+    # Percentage-only controls: convert 0-100 % → roughly -10..+40 dB scale
+    for c in controls:
+        if c.get("pct_value") is not None:
+            return round(c["pct_value"] / 100 * 50 - 10)
     return None
 
 
 def set_capture_gain(device: AudioDevice, gain_db: int) -> bool:
-    """Best-effort gain via amixer. Interfaces without a capture control no-op."""
-    for control in ("Mic", "Capture", "PCM Capture Source", "Digital"):
-        rc, _, _ = _run(
-            ["amixer", "-c", str(device.card), "set", control, f"{gain_db}dB"]
-        )
-        if rc == 0:
+    """Set capture gain via amixer sset.
+
+    Tries every discovered capture control, then the known-name fallback list.
+    For each control tries the dB string first, then a percentage equivalent
+    (some devices only accept one format).
+    """
+    pct = max(0, min(100, round((gain_db + 10) / 50 * 100)))
+
+    # Prefer controls the device actually reports as having capture capability.
+    discovered = [c["name"] for c in discover_capture_controls(device)]
+    all_controls = discovered + [n for n in _CAPTURE_CONTROLS if n not in discovered]
+
+    for name in all_controls:
+        if _amixer_sset(device.card, name, f"{gain_db}dB"):
             return True
+        if _amixer_sset(device.card, name, f"{pct}%"):
+            return True
+
     return False
