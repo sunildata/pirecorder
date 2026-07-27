@@ -31,25 +31,16 @@
 
 <!-- Levels + Waveform -->
 <div class="card">
-  <!-- Card title row -->
   <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
     <span>Input Level</span>
     <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
-      <button class="btn btn-sm monitor-off" id="btn-monitor" title="Toggle input monitoring">
-        Monitor Off
+      <button class="btn btn-ghost btn-sm" id="btn-monitor" title="Monitor input without recording">
+        Monitor
       </button>
       <span class="clip-badge" id="clip" title="Tap to reset">CLIP</span>
     </div>
   </div>
 
-  <!-- Signal status row -->
-  <div class="signal-row">
-    <span class="signal-dot" id="signal-dot"></span>
-    <span class="signal-label" id="signal-label">NO SIGNAL</span>
-    <span class="signal-peak"  id="signal-peak"></span>
-  </div>
-
-  <!-- VU meters -->
   <div class="meter-row">
     <span class="meter-label">L</span>
     <div class="meter"><div class="meter-fill" id="m-l"></div><div class="meter-hold" id="h-l"></div></div>

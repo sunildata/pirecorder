@@ -42,45 +42,15 @@
     if (levels.waveform && levels.waveform.length) {
       waveformPush(levels.waveform);
     }
-    renderSignalStatus(levels);
   }
 
   function clearMeters() {
-    // Never wipe live meter data while the monitor is running — the wipeout
-    // was the main reason the waveform appeared flat in idle mode.
-    if (monitorActive) return;
     ['l', 'r'].forEach((ch) => {
       $(`m-${ch}`).style.width = '0%';
       $(`h-${ch}`).style.opacity = '0';
       $(`db-${ch}`).textContent = '−∞';
     });
     waveformClear();
-    renderSignalStatus(null);
-  }
-
-  /* ── Signal status badge ─────────────────────────────────────────────── */
-  // Threshold above which we consider a signal "present" (−50 dBFS).
-  const SIG_THRESHOLD = -50;
-
-  function renderSignalStatus(levels) {
-    const dot   = $('signal-dot');
-    const label = $('signal-label');
-    const peak  = $('signal-peak');
-    if (!dot) return;
-
-    if (!levels || !levels.active) {
-      dot.className   = 'signal-dot';
-      if (label) label.textContent = 'NO SIGNAL';
-      if (peak)  peak.textContent  = '';
-      return;
-    }
-
-    const maxPeak = Math.max(...(levels.peak_db || [-90]));
-    const hasSignal = maxPeak > SIG_THRESHOLD;
-
-    dot.className   = 'signal-dot' + (hasSignal ? ' sig-on' : '');
-    if (label) label.textContent = hasSignal ? 'SIGNAL' : 'SILENT';
-    if (peak)  peak.textContent  = hasSignal ? `${fmtDb(maxPeak)} dB` : '';
   }
 
   /* ── Waveform oscilloscope (ring-buffer, full-redraw) ───────────────── */
@@ -180,20 +150,13 @@
 
   function applyStatus(s) {
     if (!s) return;
-    const wasRecording = state.is_recording;
     state = s;
     const rec    = s.is_recording;
     const paused = s.is_paused;
 
     // When recording starts, the backend kills the monitor automatically;
-    // reflect that in the UI.
+    // update the UI to match.
     if (rec && monitorActive) applyMonitorUi(false);
-
-    // When recording stops, restart the input monitor so the engineer can
-    // immediately see the level without touching anything.
-    if (wasRecording && !rec) {
-      setTimeout(autoStartMonitor, 400);
-    }
 
     el.record.disabled = rec && !paused;
     el.pause.disabled = !rec;
@@ -372,41 +335,28 @@
   function applyMonitorUi(active) {
     monitorActive = active;
     if (!btnMonitor) return;
-    btnMonitor.textContent = active ? 'Monitoring…' : 'Monitor Off';
-    btnMonitor.classList.toggle('monitor-on', active);
-    btnMonitor.classList.toggle('monitor-off', !active);
-  }
-
-  async function autoStartMonitor() {
-    if (monitorActive || state.is_recording) return;
-    try {
-      await ZP.api('/monitor', { method: 'POST', body: { active: true } });
-      applyMonitorUi(true);
-    } catch (_) {
-      // Device unavailable or already recording — fail silently.
-    }
+    btnMonitor.textContent = active ? 'Stop Monitor' : 'Monitor';
+    btnMonitor.classList.toggle('btn-rec', active);
+    btnMonitor.classList.toggle('btn-ghost', !active);
   }
 
   if (btnMonitor) {
     btnMonitor.addEventListener('click', () => guard(async () => {
       if (state.is_recording) {
-        ZP.toast('Cannot change monitor while recording', 'error');
+        ZP.toast('Cannot monitor while recording', 'error');
         return;
       }
       const next = !monitorActive;
       await ZP.api('/monitor', { method: 'POST', body: { active: next } });
       applyMonitorUi(next);
-      if (!next) {
+      if (next) {
+        ZP.toast('Monitoring input…', 'ok');
+      } else {
+        ZP.toast('Monitor stopped', '');
         waveformClear();
-        renderSignalStatus(null);
-        ZP.toast('Monitor off', '');
       }
     }));
   }
-
-  // Auto-start the monitor when the page opens so the engineer can see the
-  // input level immediately — no button press needed.
-  setTimeout(autoStartMonitor, 600);
 
   /* ── Input Gain control ──────────────────────────────────────────────── */
 

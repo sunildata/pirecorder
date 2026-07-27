@@ -244,57 +244,12 @@ audio { width: 100%; margin-top: 9px; height: 34px; }
 }
 .offline-badge.show { display: block; }
 
-/* ── Monitor button states ────────────────────────────────────────────── */
-.monitor-on {
-  background: transparent;
-  border: 1px solid var(--ok);
-  color: var(--ok);
-  font-size: 12px; padding: 7px 12px; flex: none; border-radius: 8px;
-}
-.monitor-off {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 12px; padding: 7px 12px; flex: none; border-radius: 8px;
-}
-.monitor-on:disabled, .monitor-off:disabled { opacity: .35; cursor: not-allowed; }
-
-/* ── Signal status row ────────────────────────────────────────────────── */
-.signal-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 0 10px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 12px;
-}
-.signal-dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: var(--surface-2);
-  border: 2px solid var(--border);
-  flex-shrink: 0;
-  transition: background .25s, border-color .25s;
-}
-.signal-dot.sig-on {
-  background: var(--ok);
-  border-color: var(--ok);
-  box-shadow: 0 0 6px rgba(46,213,115,.55);
-}
-.signal-label {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--muted);
-  transition: color .25s;
-}
-.signal-dot.sig-on + .signal-label { color: var(--ok); }
-.signal-peak {
-  margin-left: auto;
-  font-size: 13px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
+/* ── Monitor button (active state overrides ghost) ───────────────────── */
+#btn-monitor.btn-rec {
+  background: var(--rec);
+  border-color: var(--rec);
+  color: #fff;
+  animation: pulse 1.4s infinite;
 }
 
 /* ── Waveform oscilloscope ────────────────────────────────────────────── */
