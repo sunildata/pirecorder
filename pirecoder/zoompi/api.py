@@ -213,35 +213,6 @@ def set_gain():
     return jsonify({"ok": ok, "gain_db": gain_db, "supported": ok})
 
 
-@api.post("/monitor")
-@login_required
-def set_monitor():
-    """Start or stop the idle input monitor (pre-recording level check).
-
-    Body: {"active": true}  — start monitoring
-          {"active": false} — stop monitoring
-    """
-    meter = _meter()
-    active = bool(_body().get("active", False))
-
-    if active:
-        if _recorder().is_recording:
-            return jsonify({"error": "Cannot monitor while recording"}), 409
-        dev = audio_devices.select_device(config.get("audio_device"))
-        if not dev:
-            return jsonify({"error": "No audio device found"}), 404
-        rate, depth, channels = (
-            int(config.get("sample_rate") or 48000),
-            int(config.get("bit_depth")   or 16),
-            int(config.get("channels")    or 2),
-        )
-        meter.start_monitor(dev.alsa_id, rate, depth, channels)
-    else:
-        meter.stop_monitor()
-
-    return jsonify({"ok": True, "active": active})
-
-
 # ── Files ────────────────────────────────────────────────────────────────────
 
 @api.get("/recordings")

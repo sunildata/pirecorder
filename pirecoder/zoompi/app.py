@@ -102,17 +102,17 @@ class Broadcaster:
         last_system = 0.0
         while not self._stop.wait(0.1):
             try:
-                status    = self._recorder.status()
+                status = self._recorder.status()
                 recording = status.get("is_recording")
-                levels    = self._meter.read()
 
-                # Always push levels so the idle monitor waveform reaches clients.
-                if recording or levels.get("active"):
-                    socketio.emit("levels", {"levels": levels, "status": status})
+                if recording:
+                    socketio.emit(
+                        "levels", {"levels": self._meter.read(), "status": status}
+                    )
                     time.sleep(0.0)  # yield; the 0.1 s wait paces us at ~10 Hz
                 else:
                     socketio.emit("status", status)
-                    self._stop.wait(0.4)  # fully idle — slow poll is fine
+                    self._stop.wait(0.4)  # idle clients don't need 10 Hz
 
                 now = time.time()
                 if now - last_system >= 5.0:
