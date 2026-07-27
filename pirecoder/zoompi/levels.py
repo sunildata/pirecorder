@@ -60,6 +60,7 @@ class LevelMeter:
             "peak_hold_db": [SILENCE_DBFS, SILENCE_DBFS],
             "clip": [False, False],
             "active": False,
+            "waveform": [],
         }
 
     # ── Public API ───────────────────────────────────────────────────────────
@@ -117,6 +118,7 @@ class LevelMeter:
             return
 
         peaks, rms = self._analyse(chunk, channels, width)
+        waveform = self._make_waveform(chunk, channels, width)
         now = time.time()
 
         with self._lock:
@@ -138,6 +140,7 @@ class LevelMeter:
                 "peak_hold_db": [round(_to_dbfs(v), 1) for v in self._peak_hold],
                 "clip": list(self._clip_latched),
                 "active": True,
+                "waveform": waveform,
             }
 
     @staticmethod
@@ -165,6 +168,31 @@ class LevelMeter:
                 os.close(fd)
         except OSError:
             return b""
+
+    @classmethod
+    def _make_waveform(cls, chunk: bytes, channels: int, width: int, n_points: int = 80) -> list[float]:
+        """Return n_points oscilloscope samples (−1..1) from the left channel for display."""
+        samples = cls._decode(chunk, width)
+        if not samples:
+            return []
+        full_scale = float(1 << (width * 8 - 1))
+        # Use left channel (or mono)
+        stride = channels if channels >= 2 else 1
+        mono = samples[0::stride]
+        if not mono:
+            return []
+        bucket = max(1, len(mono) // n_points)
+        result: list[float] = []
+        for i in range(n_points):
+            start = i * bucket
+            end = min(start + bucket, len(mono))
+            if start >= len(mono):
+                result.append(0.0)
+            else:
+                # Peak in bucket preserves waveform shape for oscilloscope display
+                peak = max(mono[start:end], key=abs)
+                result.append(round(float(peak) / full_scale, 3))
+        return result
 
     @classmethod
     def _analyse(cls, chunk: bytes, channels: int, width: int) -> tuple[list[float], list[float]]:

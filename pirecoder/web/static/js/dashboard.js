@@ -1,4 +1,4 @@
-/* Dashboard: transport, VU meters, telemetry.
+/* Dashboard: transport, VU meters, waveform, gain control, telemetry.
 
    The timer runs off a local interval seeded by server duration rather than
    waiting for each frame. That way it keeps counting smoothly even if the
@@ -39,6 +39,9 @@
     });
     const clipped = (levels.clip || []).some(Boolean);
     el.clip.classList.toggle('on', clipped);
+    if (levels.waveform && levels.waveform.length) {
+      waveformPush(levels.waveform);
+    }
   }
 
   function clearMeters() {
@@ -47,7 +50,107 @@
       $(`h-${ch}`).style.opacity = '0';
       $(`db-${ch}`).textContent = '−∞';
     });
+    waveformClear();
   }
+
+  /* ── Waveform oscilloscope ───────────────────────────────────────────── */
+
+  const wfCanvas = $('waveform');
+  const wfCtx = wfCanvas ? wfCanvas.getContext('2d') : null;
+  // Pixels scrolled left each time new data arrives (10 Hz → 40px/frame ≈ 400px/s)
+  const WF_SCROLL = 40;
+  // CSS colours matching app.css design tokens
+  const WF_BG    = '#0e1219';
+  const WF_LINE  = '#4f8cff';
+  const WF_GRID  = '#1c2230';
+  const WF_ZERO  = '#2a3242';
+
+  function waveformResize() {
+    if (!wfCanvas || !wfCtx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = wfCanvas.clientWidth;
+    const cssH = wfCanvas.clientHeight;
+    if (!cssW) return;
+    wfCanvas.width  = cssW * dpr;
+    wfCanvas.height = cssH * dpr;
+    wfCtx.scale(dpr, dpr);
+    waveformDrawGrid(cssW, cssH);
+  }
+
+  function waveformDrawGrid(w, h) {
+    if (!wfCtx) return;
+    wfCtx.fillStyle = WF_BG;
+    wfCtx.fillRect(0, 0, w, h);
+    // Horizontal centre line
+    wfCtx.strokeStyle = WF_ZERO;
+    wfCtx.lineWidth = 1;
+    wfCtx.beginPath();
+    wfCtx.moveTo(0, h / 2);
+    wfCtx.lineTo(w, h / 2);
+    wfCtx.stroke();
+    // ±50% guide lines
+    wfCtx.strokeStyle = WF_GRID;
+    [0.25, 0.75].forEach((frac) => {
+      wfCtx.beginPath();
+      wfCtx.moveTo(0, h * frac);
+      wfCtx.lineTo(w, h * frac);
+      wfCtx.stroke();
+    });
+  }
+
+  function waveformClear() {
+    if (!wfCtx || !wfCanvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    waveformDrawGrid(wfCanvas.width / dpr, wfCanvas.height / dpr);
+  }
+
+  function waveformPush(points) {
+    if (!wfCtx || !wfCanvas || !points.length) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W = wfCanvas.width  / dpr;
+    const H = wfCanvas.height / dpr;
+    const mid = H / 2;
+
+    // Shift existing content left by WF_SCROLL pixels
+    wfCtx.drawImage(wfCanvas, -WF_SCROLL * dpr, 0, wfCanvas.width, wfCanvas.height,
+                              0, 0, wfCanvas.width, wfCanvas.height);
+
+    // Clear the right strip (accounting for DPR artefacts)
+    wfCtx.fillStyle = WF_BG;
+    wfCtx.fillRect(W - WF_SCROLL - 1, 0, WF_SCROLL + 1, H);
+
+    // Redraw grid lines in the new strip
+    wfCtx.strokeStyle = WF_ZERO;
+    wfCtx.lineWidth = 1;
+    wfCtx.beginPath();
+    wfCtx.moveTo(W - WF_SCROLL, mid);
+    wfCtx.lineTo(W, mid);
+    wfCtx.stroke();
+    wfCtx.strokeStyle = WF_GRID;
+    [0.25, 0.75].forEach((frac) => {
+      wfCtx.beginPath();
+      wfCtx.moveTo(W - WF_SCROLL, H * frac);
+      wfCtx.lineTo(W, H * frac);
+      wfCtx.stroke();
+    });
+
+    // Draw new waveform samples in the right strip
+    wfCtx.strokeStyle = WF_LINE;
+    wfCtx.lineWidth = 1.5;
+    wfCtx.lineJoin = 'round';
+    wfCtx.beginPath();
+    const xStep = WF_SCROLL / (points.length - 1 || 1);
+    points.forEach((v, i) => {
+      const x = W - WF_SCROLL + i * xStep;
+      const y = mid - v * mid * 0.88;
+      i === 0 ? wfCtx.moveTo(x, y) : wfCtx.lineTo(x, y);
+    });
+    wfCtx.stroke();
+  }
+
+  window.addEventListener('resize', waveformResize);
+  // Defer until layout is complete so clientWidth is non-zero
+  setTimeout(waveformResize, 0);
 
   /* ── Transport state ─────────────────────────────────────────────────── */
 
@@ -224,6 +327,69 @@
     await ZP.api('/levels/reset-clip', { method: 'POST' });
     el.clip.classList.remove('on');
   }));
+
+  /* ── Input Gain control ──────────────────────────────────────────────── */
+
+  const gainSlider    = $('gain-slider');
+  const gainDbLabel   = $('gain-db-label');
+  const gainStatus    = $('gain-status');
+  let gainSupported   = false;
+  let gainDebounce    = null;
+
+  function gainLabel(v) {
+    const n = parseInt(v, 10);
+    return n >= 0 ? `+${n} dB` : `${n} dB`;
+  }
+
+  function applyGainUi(gain_db, supported) {
+    gainSupported = supported;
+    const card = $('gain-card');
+    if (card) card.classList.toggle('gain-unsupported', !supported);
+    if (gainSlider) gainSlider.disabled = !supported;
+    if (gainDbLabel) gainDbLabel.textContent = gainLabel(gain_db);
+    if (gainSlider)  gainSlider.value = gain_db;
+    if (gainStatus) {
+      gainStatus.textContent = supported
+        ? ''
+        : 'Gain control not available for this device';
+    }
+  }
+
+  async function sendGain(db) {
+    try {
+      const res = await ZP.api('/gain', { method: 'POST', body: { gain_db: db } });
+      if (res.ok) {
+        ZP.toast(`Gain set to ${gainLabel(res.gain_db)}`, 'ok');
+        if (gainDbLabel) gainDbLabel.textContent = gainLabel(res.gain_db);
+      } else {
+        ZP.toast('Gain not supported on this device', 'error');
+        applyGainUi(0, false);
+      }
+    } catch (err) {
+      ZP.toast(err.message, 'error');
+    }
+  }
+
+  if (gainSlider) {
+    gainSlider.addEventListener('input', () => {
+      if (gainDbLabel) gainDbLabel.textContent = gainLabel(gainSlider.value);
+      clearTimeout(gainDebounce);
+      gainDebounce = setTimeout(() => sendGain(parseInt(gainSlider.value, 10)), 300);
+    });
+  }
+
+  document.querySelectorAll('[data-gain]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!gainSupported) { ZP.toast('Gain control not supported', 'error'); return; }
+      const db = parseInt(btn.dataset.gain, 10);
+      if (gainSlider) gainSlider.value = db;
+      if (gainDbLabel) gainDbLabel.textContent = gainLabel(db);
+      sendGain(db);
+    });
+  });
+
+  // Load current gain on page open
+  ZP.api('/gain').then((r) => applyGainUi(r.gain_db, r.supported)).catch(() => applyGainUi(0, false));
 
   /* ── Wire up ─────────────────────────────────────────────────────────── */
 

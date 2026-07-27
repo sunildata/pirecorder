@@ -29,7 +29,7 @@
   <div class="markers" id="markers"></div>
 </div>
 
-<!-- Levels -->
+<!-- Levels + Waveform -->
 <div class="card">
   <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
     <span>Input Level</span>
@@ -47,6 +47,37 @@
     <span class="meter-db" id="db-r">−∞</span>
   </div>
   <div class="scale"><span>−60</span><span>−40</span><span>−20</span><span>−12</span><span>−6</span><span>0</span></div>
+
+  <!-- Live waveform oscilloscope -->
+  <canvas id="waveform" class="waveform-canvas"></canvas>
+  <div class="waveform-label">Live Waveform</div>
+</div>
+
+<!-- Input Gain -->
+<div class="card" id="gain-card">
+  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Input Gain</span>
+    <span class="gain-value" id="gain-db-label">0 dB</span>
+  </div>
+
+  <div class="gain-row">
+    <span class="gain-icon">−</span>
+    <input type="range" id="gain-slider" class="gain-slider" min="-10" max="40" step="1" value="0">
+    <span class="gain-icon">+</span>
+  </div>
+  <div class="gain-ticks">
+    <span>−10</span><span>0</span><span>+10</span><span>+20</span><span>+30</span><span>+40 dB</span>
+  </div>
+
+  <div class="gain-presets">
+    <button class="btn btn-ghost btn-sm" data-gain="0">0 dB</button>
+    <button class="btn btn-ghost btn-sm" data-gain="10">+10</button>
+    <button class="btn btn-ghost btn-sm" data-gain="20">+20</button>
+    <button class="btn btn-ghost btn-sm" data-gain="30">+30</button>
+    <button class="btn btn-ghost btn-sm" data-gain="40">+40</button>
+  </div>
+
+  <div id="gain-status" class="gain-status"></div>
 </div>
 
 <!-- Take info -->

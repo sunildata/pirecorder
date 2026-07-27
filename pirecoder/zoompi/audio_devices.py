@@ -137,6 +137,18 @@ def negotiate_format(
     return rate, depth, channels
 
 
+def get_capture_gain(device: AudioDevice) -> int | None:
+    """Read current capture gain in dB. Returns None if the device has no software gain control."""
+    for control in ("Mic", "Capture", "PCM Capture Source", "Digital"):
+        rc, out, _ = _run(["amixer", "-c", str(device.card), "get", control])
+        if rc != 0:
+            continue
+        m = re.search(r"\[([+-]?\d+(?:\.\d+)?)dB\]", out)
+        if m:
+            return round(float(m.group(1)))
+    return None
+
+
 def set_capture_gain(device: AudioDevice, gain_db: int) -> bool:
     """Best-effort gain via amixer. Interfaces without a capture control no-op."""
     for control in ("Mic", "Capture", "PCM Capture Source", "Digital"):

@@ -185,6 +185,34 @@ def reset_clip():
     return jsonify({"ok": True})
 
 
+@api.get("/gain")
+@login_required
+def get_gain():
+    dev = audio_devices.select_device(config.get("audio_device"))
+    if not dev:
+        return jsonify({"gain_db": 0, "supported": False})
+    gain = audio_devices.get_capture_gain(dev)
+    return jsonify({"gain_db": gain if gain is not None else 0, "supported": gain is not None})
+
+
+@api.post("/gain")
+@login_required
+def set_gain():
+    gain_db = _body().get("gain_db")
+    if gain_db is None:
+        return jsonify({"error": "gain_db is required"}), 400
+    try:
+        gain_db = int(gain_db)
+    except (ValueError, TypeError):
+        return jsonify({"error": "gain_db must be an integer"}), 400
+    gain_db = max(-10, min(40, gain_db))
+    dev = audio_devices.select_device(config.get("audio_device"))
+    if not dev:
+        return jsonify({"error": "No audio device found"}), 404
+    ok = audio_devices.set_capture_gain(dev, gain_db)
+    return jsonify({"ok": ok, "gain_db": gain_db, "supported": ok})
+
+
 # ── Files ────────────────────────────────────────────────────────────────────
 
 @api.get("/recordings")
