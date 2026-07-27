@@ -9,9 +9,8 @@
 
   const el = {
     timer: $('timer'), sub: $('timer-sub'), alert: $('alert'),
-    label: $('label'), markers: $('markers'), clip: $('clip'),
+    label: $('label'), clip: $('clip'),
     record: $('btn-record'), pause: $('btn-pause'), stop: $('btn-stop'),
-    marker: $('btn-marker'), notes: $('btn-notes'),
   };
 
   let state = { is_recording: false, is_paused: false, session: null };
@@ -163,7 +162,6 @@
     el.record.disabled = rec && !paused;
     el.pause.disabled = !rec;
     el.stop.disabled = !rec;
-    el.marker.disabled = !rec || paused;
     el.label.disabled = rec;
 
     el.pause.textContent = paused ? 'Resume' : 'Pause';
@@ -183,7 +181,6 @@
       $('s-parts').textContent = (s.session.segments || []).length;
       $('s-device').textContent = s.session.channels === 2 ? 'Stereo' : 'Mono';
 
-      renderMarkers(s.session.markers || []);
     } else {
       localDuration = 0;
       el.timer.textContent = '00:00:00';
@@ -191,7 +188,6 @@
       ['s-size', 's-format', 's-parts', 's-device'].forEach((k) => {
         $(k).textContent = '—';
       });
-      el.markers.innerHTML = '';
       clearMeters();
     }
 
@@ -206,19 +202,6 @@
       localDuration += 1;
       el.timer.textContent = ZP.hms(localDuration);
     }, 1000);
-  }
-
-  function renderMarkers(markers) {
-    el.markers.innerHTML = markers
-      .slice(-8)
-      .map((m) => `<span class="marker-chip">${ZP.hms(m.offset_seconds)} · ${escapeHtml(m.label)}</span>`)
-      .join('');
-  }
-
-  function escapeHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s ?? '';
-    return d.innerHTML;
   }
 
   function showAlert(message, kind = '') {
@@ -304,23 +287,6 @@
     ZP.toast(`Saved: ${res.session.base_name}`, 'ok');
     el.label.value = '';
     applyStatus({ is_recording: false, is_paused: false, session: null });
-  }));
-
-  el.marker.addEventListener('click', () => guard(async () => {
-    const m = await ZP.api('/record/marker', { method: 'POST', body: {} });
-    ZP.toast(`Marker at ${ZP.hms(m.offset_seconds)}`, 'ok');
-  }));
-
-  el.notes.addEventListener('click', () => guard(async () => {
-    const current = state.session?.notes || '';
-    const notes = prompt('Notes for this recording:', current);
-    if (notes === null) return;
-    if (state.is_recording) {
-      await ZP.api('/record/notes', { method: 'POST', body: { notes } });
-      ZP.toast('Notes saved', 'ok');
-    } else {
-      ZP.toast('Notes apply to an active recording', 'error');
-    }
   }));
 
   el.clip.addEventListener('click', () => guard(async () => {
