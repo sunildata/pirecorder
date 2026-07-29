@@ -40,11 +40,7 @@ def _to_dbfs(amplitude: float) -> float:
 class LevelMeter:
     """Polls the active recording file and publishes RMS/peak per channel."""
 
-    # 20 Hz: halves the metering latency versus 10 Hz, and because the read
-    # window below is sized to exactly one poll interval, consecutive reads are
-    # contiguous — no audio is skipped, so the waveform draws as a continuous
-    # trace instead of a series of disjoint snapshots.
-    def __init__(self, recorder, poll_hz: float = 20.0) -> None:
+    def __init__(self, recorder, poll_hz: float = 10.0) -> None:
         self._recorder = recorder
         self._interval = 1.0 / poll_hz
         self._lock = threading.Lock()
@@ -113,11 +109,9 @@ class LevelMeter:
         rate = int(session["sample_rate"])
         width = depth // 8
 
-        # Window == one poll interval, aligned to a whole frame. Sizing it this
-        # way means each read picks up exactly the audio written since the last
-        # read, so nothing is missed and nothing is drawn twice.
+        # ~50 ms window, aligned to a whole frame.
         frame = channels * width
-        window = max(frame, int(rate * self._interval) * frame)
+        window = max(frame, int(rate * 0.05) * frame)
 
         chunk = self._read_tail(path, window, frame)
         if not chunk:
@@ -176,7 +170,7 @@ class LevelMeter:
             return b""
 
     @classmethod
-    def _make_waveform(cls, chunk: bytes, channels: int, width: int, n_points: int = 40) -> list[float]:
+    def _make_waveform(cls, chunk: bytes, channels: int, width: int, n_points: int = 80) -> list[float]:
         """Return n_points oscilloscope samples (−1..1) from the left channel for display."""
         samples = cls._decode(chunk, width)
         if not samples:

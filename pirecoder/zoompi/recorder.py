@@ -386,16 +386,6 @@ class Recorder:
 
         path = self._segment_path(index)
         fmt = FORMAT_BY_DEPTH.get(session.bit_depth, "S16_LE")
-
-        # --period-size / --buffer-size are in FRAMES, so derive them from the
-        # negotiated rate rather than hardcoding. Two reasons this matters:
-        #   * The level meter reads the tail of this file, so anything arecord
-        #     still holds in the ALSA buffer is latency the operator sees.
-        #   * Whatever is buffered is also what a power cut destroys.
-        # 0.5 s of buffer still leaves ample headroom for an SD write stall.
-        period_frames = max(256, int(session.sample_rate * 0.1))
-        buffer_frames = max(1024, int(session.sample_rate * 0.5))
-
         cmd = [
             "arecord",
             "-D", session.device.alsa_id,
@@ -403,8 +393,7 @@ class Recorder:
             "-r", str(session.sample_rate),
             "-c", str(session.channels),
             "-t", "wav",
-            f"--period-size={period_frames}",
-            f"--buffer-size={buffer_frames}",
+            "--buffer-size=192000",   # ~1 s at 48 kHz stereo 16-bit
             str(path),
         ]
 

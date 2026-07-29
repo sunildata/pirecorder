@@ -100,10 +100,7 @@ class Broadcaster:
 
     def _run(self) -> None:
         last_system = 0.0
-        # 0.05 s → 20 Hz, matching the level meter's poll rate so a freshly
-        # sampled frame is pushed out almost immediately rather than waiting
-        # out a slower broadcast tick.
-        while not self._stop.wait(0.05):
+        while not self._stop.wait(0.1):
             try:
                 status = self._recorder.status()
                 recording = status.get("is_recording")
@@ -112,10 +109,10 @@ class Broadcaster:
                     socketio.emit(
                         "levels", {"levels": self._meter.read(), "status": status}
                     )
-                    time.sleep(0.0)  # yield; the 0.05 s wait paces us at ~20 Hz
+                    time.sleep(0.0)  # yield; the 0.1 s wait paces us at ~10 Hz
                 else:
                     socketio.emit("status", status)
-                    self._stop.wait(0.45)  # idle clients don't need 20 Hz
+                    self._stop.wait(0.4)  # idle clients don't need 10 Hz
 
                 now = time.time()
                 if now - last_system >= 5.0:
