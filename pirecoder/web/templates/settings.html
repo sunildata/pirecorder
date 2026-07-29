@@ -35,10 +35,36 @@
       <label>Output format</label>
       <select id="output_format">
         <option value="wav">WAV only</option>
-        <option value="wav+mp3">WAV + MP3</option>
+        <option value="wav+flac">WAV + FLAC (lossless, ~40% smaller)</option>
+        <option value="wav+mp3">WAV + MP3 (lossy, shareable)</option>
+        <option value="wav+flac+mp3">WAV + FLAC + MP3</option>
       </select>
+      <div class="file-meta" id="format-info" style="margin-top:6px">
+        The master WAV is always kept; extras are rendered after the take.
+      </div>
     </div>
   </div>
+</div>
+
+<!-- Input gain -->
+<div class="card">
+  <div class="card-title">Input Gain</div>
+  <div class="file-meta" style="margin-bottom:12px">
+    Applies immediately to the interface mixer and is restored after a reboot.
+  </div>
+  <div class="gain-row">
+    <span class="gain-icon">🎚</span>
+    <input type="range" id="settings-gain" class="gain-slider" min="0" max="100" step="1" value="75">
+    <span class="gain-value" id="settings-gain-value">75%</span>
+  </div>
+  <div class="gain-presets">
+    <button class="btn btn-ghost btn-sm" data-gain="0">0%</button>
+    <button class="btn btn-ghost btn-sm" data-gain="25">25%</button>
+    <button class="btn btn-ghost btn-sm" data-gain="50">50%</button>
+    <button class="btn btn-ghost btn-sm" data-gain="75">75%</button>
+    <button class="btn btn-ghost btn-sm" data-gain="100">100%</button>
+  </div>
+  <div class="gain-status" id="settings-gain-status">Checking mixer…</div>
 </div>
 
 <!-- Recording -->

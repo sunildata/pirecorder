@@ -26,18 +26,23 @@ DEFAULTS: dict[str, Any] = {
     "password": "zoompi",          # replaced by a hash on first save
     "auth_enabled": True,
     # ── Audio ───────────────────────────────────────────────────────────────
-    "sample_rate": 48000,
-    "bit_depth": 16,               # raised to 24 automatically if supported
+    "sample_rate": 48000,          # negotiated down if the interface can't do it
+    "bit_depth": 16,               # 16 | 24 | 32, subject to hardware support
     "channels": 2,                 # 1 = mono, 2 = stereo
     "audio_device": "auto",        # "auto" or an ALSA id such as "hw:1,0"
-    "capture_gain": 0,             # dB applied by the interface mixer
+    # Input gain as a percentage of the ALSA capture control's own range. ALSA
+    # forgets mixer levels across reboots, so this is the source of truth and
+    # gets pushed back to the hardware on startup and before every take.
+    "capture_gain_percent": 75,
     # ── Recording behaviour ─────────────────────────────────────────────────
     "auto_split_mb": 2048,         # 0 disables size-based splitting
     "auto_split_minutes": 0,       # 0 disables time-based splitting
     "recording_lock": False,       # requires confirmation before stopping
     "dual_recording": False,       # simultaneous -12 dB safety take
-    "output_format": "wav",        # wav | wav+mp3
+    # The master WAV is always written; these add renders alongside it.
+    "output_format": "wav",        # wav | wav+flac | wav+mp3 | wav+flac+mp3
     "mp3_bitrate": "192k",
+    "flac_compression": 5,         # 0-12; 5 is FLAC's own default
     # ── Storage ─────────────────────────────────────────────────────────────
     "auto_cleanup": False,
     "cleanup_threshold_pct": 90,   # start deleting oldest above this usage

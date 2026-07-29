@@ -95,7 +95,8 @@ for pkg in alsa-utils python3-pip python3-flask curl; do
   fi
 done
 
-# ffmpeg is only required for MP3 export and post-processing.
+# ffmpeg provides the FLAC and MP3 encoders plus all post-processing filters.
+# Without it only plain WAV output works.
 if command -v ffmpeg >/dev/null 2>&1; then
   skip "ffmpeg"
 else
@@ -172,6 +173,42 @@ if echo "$CAPTURE_LIST" | grep -q '^card'; then
     ok "USB audio interface detected"
   else
     warn "no USB interface found — the Pi has no built-in line input"
+  fi
+
+  # Report the formats and the input gain control up front. The dashboard
+  # probes the same things at runtime, but seeing it here tells the user
+  # whether their interface has software gain before they go looking for the
+  # slider and find it greyed out.
+  CARD_NUM="$(echo "$CAPTURE_LIST" | grep -m1 -i usb | sed 's/^card \([0-9]*\).*/\1/')"
+  [ -z "$CARD_NUM" ] && CARD_NUM="$(echo "$CAPTURE_LIST" | grep -m1 '^card' | sed 's/^card \([0-9]*\).*/\1/')"
+
+  if [ -n "$CARD_NUM" ]; then
+    RATES=""
+    for rate in 192000 96000 88200 48000 44100; do
+      if arecord -D "hw:${CARD_NUM},0" -f S16_LE -r "$rate" -c 2 \
+           --duration=0 -t raw /dev/null >/dev/null 2>&1; then
+        RATES="${RATES}$((rate / 1000))k "
+      fi
+    done
+    DEPTHS=""
+    for pair in "32:S32_LE" "24:S24_3LE" "16:S16_LE"; do
+      if arecord -D "hw:${CARD_NUM},0" -f "${pair#*:}" -r 48000 -c 2 \
+           --duration=0 -t raw /dev/null >/dev/null 2>&1; then
+        DEPTHS="${DEPTHS}${pair%%:*}-bit "
+      fi
+    done
+    [ -n "$RATES" ]  && ok "sample rates: ${RATES}" || warn "could not probe sample rates"
+    [ -n "$DEPTHS" ] && ok "bit depths: ${DEPTHS}"  || warn "could not probe bit depths"
+
+    # Only a control advertising cvolume can act as a software input gain.
+    GAIN_CTL="$(amixer -c "$CARD_NUM" 2>/dev/null \
+      | awk '/Simple mixer control/ {name=$0} /Capabilities:.*cvolume/ {print name; exit}' \
+      | sed "s/.*'\(.*\)',.*/\1/")"
+    if [ -n "$GAIN_CTL" ]; then
+      ok "input gain control: \"${GAIN_CTL}\" (adjustable from the dashboard)"
+    else
+      warn "no software input gain on this interface — use its hardware gain knob"
+    fi
   fi
 else
   warn "no capture device detected — plug in your USB interface before recording"
@@ -340,6 +377,22 @@ printf "\n"
 
 if [ "$HEALTHY" -eq 1 ]; then
   ok "API responding on port ${PORT}"
+
+  # A trimmed FFmpeg build can lack an encoder even when ffmpeg itself is
+  # present, which would only surface as a failed job after a real take.
+  if command -v ffmpeg >/dev/null 2>&1; then
+    ENCODERS="$(ffmpeg -hide_banner -encoders 2>/dev/null)"
+    MISSING_ENC=""
+    echo "$ENCODERS" | grep -qE '^\s*A\S*\s+flac\s'       || MISSING_ENC="FLAC"
+    echo "$ENCODERS" | grep -qE '^\s*A\S*\s+libmp3lame\s' || MISSING_ENC="${MISSING_ENC:+$MISSING_ENC and }MP3"
+    if [ -z "$MISSING_ENC" ]; then
+      ok "FFmpeg encoders present (WAV + FLAC + MP3 output available)"
+    else
+      warn "FFmpeg lacks the ${MISSING_ENC} encoder — that format is greyed out in Settings"
+    fi
+  else
+    warn "ffmpeg missing — only WAV output and no post-processing"
+  fi
 
   # Prove the service can actually change Wi-Fi, rather than assuming the
   # polkit rule took effect. A read-only nmcli call always succeeds, so this

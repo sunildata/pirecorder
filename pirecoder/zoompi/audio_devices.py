@@ -14,8 +14,24 @@ from dataclasses import dataclass, asdict, field
 
 # arecord's format names, ordered best-first.
 FORMAT_BY_DEPTH = {32: "S32_LE", 24: "S24_3LE", 16: "S16_LE"}
-CANDIDATE_DEPTHS = (24, 16)
-CANDIDATE_RATES = (96000, 48000, 44100)
+CANDIDATE_DEPTHS = (32, 24, 16)
+CANDIDATE_RATES = (192000, 96000, 88200, 48000, 44100)
+
+# Probing varies one axis at a time, so it needs a format the device already
+# accepts to vary *from*. Testing rates at 16-bit reports nothing on a
+# 24-bit-only interface, and testing anything in stereo reports nothing on a
+# mono USB mic — both cases previously left the capability lists empty and
+# sent the UI back to a hardcoded 48 kHz/16-bit guess.
+_BASELINE_LADDER = (
+    (48000, 16, 2), (48000, 24, 2), (48000, 32, 2), (44100, 16, 2),
+    (48000, 16, 1), (48000, 24, 1), (48000, 32, 1), (44100, 16, 1),
+)
+
+# Capabilities of a plugged-in interface cannot change, and probing now costs
+# up to sixteen arecord round-trips — far too much to repeat on every settings
+# page load. The identity in the key (card id + name) changes if the user
+# swaps hardware on the same ALSA index, which retires the stale entry.
+_probe_cache: dict[str, tuple[list[int], list[int], int]] = {}
 
 _CARD_RE = re.compile(
     r"^card (?P<card>\d+): (?P<cid>[^\[]+)\[(?P<cname>[^\]]+)\], "
@@ -71,6 +87,40 @@ def _probe(alsa_id: str, rate: int, depth: int, channels: int) -> bool:
     return "Device or resource busy" in err
 
 
+def _probe_capabilities(d: AudioDevice) -> None:
+    """Fill in the rates, depths and channel count the hardware really accepts."""
+    key = f"{d.alsa_id}|{d.card_id}|{d.name}"
+    cached = _probe_cache.get(key)
+    if cached is not None:
+        d.supported_rates, d.supported_depths, d.max_channels = (
+            list(cached[0]), list(cached[1]), cached[2]
+        )
+        return
+
+    baseline = next(
+        (fmt for fmt in _BASELINE_LADDER if _probe(d.alsa_id, *fmt)), None
+    )
+    if baseline is None:
+        # Present but refusing every format we know. Leave the lists empty so
+        # negotiate_format falls back instead of caching a wrong answer.
+        return
+
+    base_rate, base_depth, channels = baseline
+    d.max_channels = channels
+    d.supported_rates = [
+        r for r in CANDIDATE_RATES if _probe(d.alsa_id, r, base_depth, channels)
+    ]
+    d.supported_depths = [
+        b for b in CANDIDATE_DEPTHS if _probe(d.alsa_id, base_rate, b, channels)
+    ]
+    _probe_cache[key] = (list(d.supported_rates), list(d.supported_depths), channels)
+
+
+def clear_probe_cache() -> None:
+    """Force the next probe to re-measure — used after a device change."""
+    _probe_cache.clear()
+
+
 def list_devices(probe: bool = True) -> list[AudioDevice]:
     """Enumerate capture devices, optionally probing each for real capabilities."""
     rc, out, _ = _run(["arecord", "-l"])
@@ -96,12 +146,7 @@ def list_devices(probe: bool = True) -> list[AudioDevice]:
             is_usb="usb" in (card_id + name).lower(),
         )
         if probe:
-            d.supported_rates = [r for r in CANDIDATE_RATES if _probe(alsa_id, r, 16, 2)]
-            base_rate = d.supported_rates[0] if d.supported_rates else 48000
-            d.supported_depths = [
-                b for b in CANDIDATE_DEPTHS if _probe(alsa_id, base_rate, b, 2)
-            ]
-            d.max_channels = 2 if _probe(alsa_id, base_rate, 16, 2) else 1
+            _probe_capabilities(d)
         devices.append(d)
     return devices
 
@@ -136,7 +181,12 @@ def negotiate_format(
     depths = device.supported_depths or [16]
 
     rate = want_rate if want_rate in rates else min(rates, key=lambda r: abs(r - want_rate))
-    depth = want_depth if want_depth in depths else max(depths)
+    # Step *down* to the nearest supported depth rather than up: quietly
+    # promoting a 16-bit request to 32-bit would double every file size on a
+    # card that is already the storage bottleneck.
+    depth = want_depth if want_depth in depths else max(
+        (d for d in depths if d < want_depth), default=min(depths)
+    )
     channels = min(want_channels, max(1, device.max_channels))
     return rate, depth, channels
 
@@ -255,3 +305,16 @@ def set_capture_gain(device: AudioDevice, percent: int) -> CaptureControl | None
         if updated.name == control.name:
             return updated
     return None
+
+
+def restore_gain(percent: int, preferred: str = "auto") -> CaptureControl | None:
+    """Re-apply a stored gain to whichever interface is currently attached.
+
+    ALSA does not remember capture levels across a reboot or a re-plug, so the
+    saved setting has to be pushed back or the user silently records at
+    whatever level the driver defaults to.
+    """
+    device = select_device(preferred, probe=False)
+    if device is None:
+        return None
+    return set_capture_gain(device, percent)
