@@ -233,65 +233,11 @@ offers formats the hardware will actually accept.
 
 ---
 
-## Input gain
-
-Gain is driven as a **percentage** of the ALSA control's own range. Every
-capture control accepts a percentage, while dB is optional and device-specific,
-so `db` is reported for display only and never used to command a change.
-
-### `GET /api/gain`
-```json
-{ "supported": true, "percent": 75, "db": 18.0, "control": "Mic" }
-```
-
-`supported: false` means the interface exposes no software capture volume — its
-gain is analogue only, set with a physical knob.
-
-### `POST /api/gain`
-```json
-{ "percent": 60 }
-```
-
-Applies the level, then reads it **back** from the hardware and returns the
-real state, since devices quantise to their own step size:
-
-```json
-{ "supported": true, "percent": 59, "db": 12.0, "control": "Mic",
-  "ok": true, "requested": 60 }
-```
-
-`ok` is false when the device settled more than 5 % from the request. The
-accepted value is saved to `capture_gain_percent` and re-applied on startup and
-before every take, because ALSA forgets mixer levels across a reboot.
-
-### `GET /api/gain/controls`
-Diagnostics: every capture volume control `amixer` reports for the card.
-
----
-
 ## Settings
 
 ### `GET /api/settings`
 Returns current settings plus hardware `capabilities`. `password` and
 `ap_password` are redacted.
-
-```json
-{
-  "settings": { "...": "see the table below" },
-  "capabilities": {
-    "rates": [96000, 48000, 44100],
-    "depths": [24, 16],
-    "max_channels": 2,
-    "ffmpeg": true,
-    "mp3": true,
-    "flac": true
-  }
-}
-```
-
-`rates`, `depths` and `max_channels` come from probing the attached interface;
-`mp3` and `flac` report whether the installed FFmpeg build actually carries
-each encoder, which a trimmed build may not.
 
 ### `POST /api/settings`
 Accepts any subset of settings keys. Unknown keys are reported in
@@ -304,18 +250,15 @@ recording returns `409`.
 |---|---|---|---|
 | `device_name` | str | `ZoomPi` | Shown in the UI and on the OLED |
 | `auth_enabled` | bool | `true` | |
-| `sample_rate` | int | `48000` | 44100–192000; snapped to the nearest probed rate |
-| `bit_depth` | int | `16` | 16 / 24 / 32; steps *down* if unsupported |
-| `channels` | int | `2` | 1 = mono; clamped to `max_channels` |
+| `sample_rate` | int | `48000` | Clamped to probed capability |
+| `bit_depth` | int | `16` | Raised to 24 only if supported |
+| `channels` | int | `2` | 1 = mono |
 | `audio_device` | str | `auto` | `auto` prefers USB |
-| `capture_gain_percent` | int | `75` | Input gain; also settable live via `POST /api/gain` |
 | `auto_split_mb` | int | `2048` | 0 disables |
 | `auto_split_minutes` | int | `0` | 0 disables |
 | `recording_lock` | bool | `false` | Confirmation required to stop |
 | `dual_recording` | bool | `false` | −12 dB safety take |
-| `output_format` | str | `wav` | `wav`, `wav+flac`, `wav+mp3`, `wav+flac+mp3` |
-| `mp3_bitrate` | str | `192k` | |
-| `flac_compression` | int | `5` | 0–12 |
+| `output_format` | str | `wav` | `wav` or `wav+mp3` |
 | `auto_cleanup` | bool | `false` | Delete oldest when full |
 | `cleanup_threshold_pct` | int | `90` | |
 | `min_free_mb` | int | `500` | Refuse to start below this |

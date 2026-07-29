@@ -14,7 +14,7 @@ from flask import Blueprint, jsonify, request, send_file
 from . import audio_devices, db, storage, system, wifi
 from .auth import check_credentials, login_required, login_session, logout_session, set_password
 from .config import RECORDINGS_DIR, config
-from .postprocess import available_encoders, ffmpeg_available, processor
+from .postprocess import ffmpeg_available, processor
 from .recorder import RecorderError
 from .storage import StorageError
 
@@ -127,11 +127,9 @@ def record_stop():
     session = _recorder().stop()
     db.save_session(session)
 
-    # Queue optional MP3 / FLAC / DSP renders; the master WAV is already safe.
+    # Queue optional MP3 / DSP renders; the master WAV is already safe.
     queued = []
-    output_format = str(config.get("output_format") or "wav")
-    wants_mp3 = "mp3" in output_format
-    wants_flac = "flac" in output_format
+    wants_mp3 = "mp3" in config.get("output_format")
     wants_dsp = int(config.get("post_highpass_hz") or 0) > 0 or any(
         config.get(k) for k in ("post_limiter", "post_compressor", "post_noise_gate")
     )
@@ -140,8 +138,6 @@ def record_stop():
         path = folder / seg["filename"]
         if not path.exists():
             continue
-        if wants_flac:
-            queued.append(processor.convert_to_flac(path).to_dict())
         if wants_mp3:
             queued.append(processor.convert_to_mp3(path).to_dict())
         if wants_dsp:
@@ -238,10 +234,6 @@ def set_gain():
                       "its input gain is analogue only.",
         })
 
-    # Persist what the hardware settled on, not what was asked for, so the
-    # level restored after a reboot matches what the user actually heard.
-    config.set("capture_gain_percent", control.percent)
-
     payload = _gain_payload(control, True)
     # The device may quantise to its own step size, so treat "close enough"
     # as success rather than reporting a failure the user cannot act on.
@@ -301,10 +293,7 @@ def stream(folder: str, filename: str):
     """Inline playback. `conditional` gives us HTTP range support so the
     browser can seek without pulling a multi-gigabyte file."""
     path = storage.get_path(folder, filename)
-    mime = {
-        ".mp3": "audio/mpeg",
-        ".flac": "audio/flac",
-    }.get(path.suffix.lower(), "audio/wav")
+    mime = "audio/mpeg" if path.suffix.lower() == ".mp3" else "audio/wav"
     return send_file(str(path), mimetype=mime, as_attachment=False, conditional=True)
 
 
@@ -449,8 +438,6 @@ def get_settings():
                 "depths": active.supported_depths if active else [16],
                 "max_channels": active.max_channels if active else 2,
                 "ffmpeg": ffmpeg_available(),
-                "mp3": "libmp3lame" in available_encoders(),
-                "flac": "flac" in available_encoders(),
             },
         }
     )

@@ -13,7 +13,7 @@ from pathlib import Path
 from .config import RECORDINGS_DIR, config
 
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,120}$")
-AUDIO_SUFFIXES = (".wav", ".flac", ".mp3")
+AUDIO_SUFFIXES = (".wav", ".mp3")
 
 
 class StorageError(RuntimeError):

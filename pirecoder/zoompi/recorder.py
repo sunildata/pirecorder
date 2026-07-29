@@ -34,7 +34,6 @@ from .audio_devices import (
     FORMAT_BY_DEPTH,
     negotiate_format,
     select_device,
-    set_capture_gain,
 )
 from .config import RECORDINGS_DIR, config
 
@@ -238,15 +237,6 @@ class Recorder:
                 config.get("bit_depth"),
                 config.get("channels"),
             )
-
-            # A device re-plugged since the last take comes back at the
-            # driver's default level, so the saved gain is re-asserted here
-            # rather than only at boot. Never fatal: plenty of interfaces have
-            # analogue-only gain and expose no capture control at all.
-            try:
-                set_capture_gain(device, int(config.get("capture_gain_percent")))
-            except (OSError, ValueError, TypeError):
-                pass
 
             free_mb = _free_megabytes(RECORDINGS_DIR)
             if free_mb < config.get("min_free_mb"):

@@ -42,8 +42,6 @@
       else el.value = settings[k];
     });
 
-    snapToSupported(settings);
-
     // Password is never returned by the API; leave the field blank.
     $('ap_password').value = settings.ap_password ?? '';
   }
@@ -65,84 +63,26 @@
     }
   }
 
-  // Mirrors negotiate_format() on the server so the warning names the format
-  // that will really be used, not a guess.
-  function nearestRate(want, rates) {
-    return rates.reduce((best, r) =>
-      Math.abs(r - want) < Math.abs(best - want) ? r : best, rates[0]);
-  }
-
-  function nearestDepth(want, depths) {
-    const below = depths.filter((d) => d < want);
-    return below.length ? Math.max(...below) : Math.min(...depths);
-  }
-
-  // What the connected interface can actually do, as last reported.
-  const hw = { rates: [48000], depths: [16], maxChannels: 2 };
-
-  // Assigning an unsupported value to a <select> leaves it with no selection
-  // and an empty value, which collect() would then save as 0 — a format the
-  // recorder cannot open. Show the fallback the server would negotiate.
-  function snapToSupported(settings) {
-    if (!hw.rates.includes(settings.sample_rate)) {
-      $('sample_rate').value = nearestRate(settings.sample_rate, hw.rates);
-    }
-    if (!hw.depths.includes(settings.bit_depth)) {
-      $('bit_depth').value = nearestDepth(settings.bit_depth, hw.depths);
-    }
-    if (settings.channels > hw.maxChannels) {
-      $('channels').value = hw.maxChannels;
-    }
-  }
-
   function populateFormats(caps, settings) {
     const rates = caps.rates?.length ? caps.rates : [48000];
     const depths = caps.depths?.length ? caps.depths : [16];
-    const maxChannels = caps.max_channels || 2;
-    Object.assign(hw, { rates, depths, maxChannels });
 
     $('sample_rate').innerHTML = rates
       .map((r) => `<option value="${r}">${(r / 1000).toFixed(1)} kHz</option>`).join('');
     $('bit_depth').innerHTML = depths
       .map((d) => `<option value="${d}">${d}-bit</option>`).join('');
 
-    // A mono-only interface must not offer Stereo: arecord would refuse the
-    // format and the take would fail at the moment it matters most.
-    const stereo = $('channels').querySelector('[value="2"]');
-    if (stereo) {
-      stereo.disabled = maxChannels < 2;
-      if (maxChannels < 2) stereo.textContent = 'Stereo (not supported)';
-    }
-
     // If the saved setting exceeds what this interface can do, show what will
     // actually be used rather than silently lying.
     if (!rates.includes(settings.sample_rate)) {
-      ZP.toast(`Interface can't do ${settings.sample_rate / 1000} kHz — `
-        + `will use ${nearestRate(settings.sample_rate, rates) / 1000} kHz`);
+      ZP.toast(`Interface can't do ${settings.sample_rate / 1000}kHz — will use ${rates[0] / 1000}kHz`);
     }
     if (!depths.includes(settings.bit_depth)) {
-      ZP.toast(`Interface can't do ${settings.bit_depth}-bit — `
-        + `will use ${nearestDepth(settings.bit_depth, depths)}-bit`);
-    }
-    if (maxChannels < 2 && settings.channels > 1) {
-      ZP.toast('Interface is mono — will record 1 channel');
+      ZP.toast(`Interface is ${Math.max(...depths)}-bit — 24-bit unavailable`);
     }
 
-    // Grey out what this FFmpeg build cannot encode instead of letting a take
-    // finish and the conversion fail an hour later.
-    const fmt = $('output_format');
-    const missing = [];
-    if (!caps.flac) missing.push('FLAC');
-    if (!caps.mp3) missing.push('MP3');
-    fmt.querySelectorAll('option').forEach((opt) => {
-      const needsFlac = opt.value.includes('flac');
-      const needsMp3 = opt.value.includes('mp3');
-      opt.disabled = (needsFlac && !caps.flac) || (needsMp3 && !caps.mp3);
-    });
-    if (missing.length) {
-      $('format-info').textContent = caps.ffmpeg
-        ? `${missing.join(' and ')} unavailable — this FFmpeg build lacks the encoder.`
-        : 'FFmpeg is not installed — only WAV is available. Re-run install.sh.';
+    if (!caps.ffmpeg) {
+      $('output_format').querySelector('[value="wav+mp3"]').disabled = true;
     }
   }
 
@@ -190,79 +130,6 @@
       ZP.toast(res.ran ? `Freed ${res.freed_mb} MB` : res.reason, 'ok');
     } catch (err) { ZP.toast(err.message, 'error'); }
   });
-
-  /* ── Input gain ──────────────────────────────────────────────────────────
-     Gain is applied straight to the ALSA mixer and saved by the API, so it is
-     deliberately *not* part of the Save Settings payload — moving the slider
-     is the commit. */
-
-  const gainSlider = $('settings-gain');
-  const gainValue  = $('settings-gain-value');
-  const gainStatus = $('settings-gain-status');
-  let gainSupported = false;
-  let gainDebounce = null;
-  let gainInFlight = false;
-  let gainQueued = null;
-
-  function gainLabel(percent, db) {
-    return db === null || db === undefined
-      ? `${percent}%`
-      : `${percent}% (${db > 0 ? '+' : ''}${db.toFixed(1)} dB)`;
-  }
-
-  function applyGainUi(res) {
-    gainSupported = !!res.supported;
-    gainSlider.disabled = !gainSupported;
-    gainSlider.value = res.percent ?? 0;
-    gainValue.textContent = gainSupported ? gainLabel(res.percent, res.db) : '—';
-    gainStatus.textContent = gainSupported
-      ? `Using ALSA control "${res.control}"`
-      : (res.reason || 'This interface has no software input gain — '
-                     + 'use its hardware gain knob.');
-  }
-
-  async function sendGain(percent) {
-    // Serialise: a dragged slider would otherwise queue dozens of amixer calls
-    // and the last reply to land could be an out-of-date value.
-    if (gainInFlight) { gainQueued = percent; return; }
-    gainInFlight = true;
-    try {
-      applyGainUi(await ZP.api('/gain', { method: 'POST', body: { percent } }));
-    } catch (err) {
-      ZP.toast(err.message, 'error');
-    } finally {
-      gainInFlight = false;
-      if (gainQueued !== null) {
-        const next = gainQueued;
-        gainQueued = null;
-        sendGain(next);
-      }
-    }
-  }
-
-  gainSlider.addEventListener('input', () => {
-    gainValue.textContent = `${gainSlider.value}%`;
-    clearTimeout(gainDebounce);
-    gainDebounce = setTimeout(() => sendGain(Number(gainSlider.value)), 150);
-  });
-
-  document.querySelectorAll('[data-gain]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (!gainSupported) {
-        ZP.toast('No software input gain on this interface', 'error');
-        return;
-      }
-      const percent = Number(btn.dataset.gain);
-      gainSlider.value = percent;
-      gainValue.textContent = `${percent}%`;
-      clearTimeout(gainDebounce);
-      sendGain(percent);
-    });
-  });
-
-  ZP.api('/gain')
-    .then(applyGainUi)
-    .catch(() => applyGainUi({ supported: false, percent: 0, db: null }));
 
   /* ── Wi-Fi ───────────────────────────────────────────────────────────── */
 

@@ -13,13 +13,11 @@ cannot saturate the CPU while a new recording is in progress.
 from __future__ import annotations
 
 import queue
-import re
 import shutil
 import subprocess
 import threading
 import time
 import uuid
-from functools import lru_cache
 from pathlib import Path
 
 from . import db
@@ -28,33 +26,6 @@ from .config import config
 
 def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
-
-
-@lru_cache(maxsize=1)
-def available_encoders() -> frozenset[str]:
-    """Which optional audio encoders this FFmpeg build carries.
-
-    Distributions ship trimmed builds — Debian's `ffmpeg` has both of these,
-    but a self-compiled or `-free` variant may lack libmp3lame. Checking up
-    front lets the settings page grey out a format instead of letting the user
-    pick one that fails silently an hour into a session.
-    """
-    if not ffmpeg_available():
-        return frozenset()
-    try:
-        proc = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-encoders"],
-            capture_output=True, text=True, timeout=15,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return frozenset()
-    if proc.returncode != 0:
-        return frozenset()
-    found = set()
-    for name in ("libmp3lame", "flac"):
-        if re.search(rf"^\s*\S*A\S*\s+{re.escape(name)}\s", proc.stdout, re.MULTILINE):
-            found.add(name)
-    return frozenset(found)
 
 
 def build_filter_chain() -> str:
@@ -139,10 +110,6 @@ class PostProcessor:
         target = source.with_suffix(".mp3")
         return self._submit(Job("mp3", source, target))
 
-    def convert_to_flac(self, source: Path) -> Job:
-        target = source.with_suffix(".flac")
-        return self._submit(Job("flac", source, target))
-
     def apply_dsp(self, source: Path) -> Job:
         target = source.with_name(f"{source.stem}_processed{source.suffix}")
         return self._submit(Job("dsp", source, target))
@@ -193,11 +160,6 @@ class PostProcessor:
 
         if job.kind == "mp3":
             cmd += ["-codec:a", "libmp3lame", "-b:a", str(config.get("mp3_bitrate"))]
-        elif job.kind == "flac":
-            # Lossless, so bit depth and sample rate carry over untouched.
-            # Levels above ~5 buy very little size for a lot of Pi 3 CPU time.
-            level = max(0, min(12, int(config.get("flac_compression") or 5)))
-            cmd += ["-codec:a", "flac", "-compression_level", str(level)]
         else:
             chain = build_filter_chain()
             if not chain:

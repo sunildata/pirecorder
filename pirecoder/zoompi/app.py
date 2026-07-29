@@ -12,7 +12,7 @@ from logging.handlers import RotatingFileHandler
 from flask import Blueprint, Flask, redirect, render_template, request, url_for
 from flask_socketio import SocketIO
 
-from . import audio_devices, db, storage, system, wifi
+from . import db, storage, system, wifi
 from .api import api, bind
 from .auth import check_credentials, is_authenticated, login_required, login_session, logout_session
 from .config import BASE_DIR, LOG_DIR, config
@@ -215,17 +215,6 @@ def create_app() -> tuple[Flask, SocketIO]:
         # A phone that just reconnected gets the full picture immediately.
         socketio.emit("status", recorder.status())
         socketio.emit("system", system.snapshot())
-
-    # ALSA resets capture levels on every boot, so the saved input gain has to
-    # be pushed back to the mixer before the user's first take.
-    try:
-        restored = audio_devices.restore_gain(
-            int(config.get("capture_gain_percent")), config.get("audio_device")
-        )
-        if restored is not None:
-            log.info("Input gain restored: %s at %d%%", restored.name, restored.percent)
-    except Exception as exc:
-        log.warning("Could not restore input gain: %s", exc)
 
     # Background services.
     meter.start()
