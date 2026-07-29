@@ -52,108 +52,104 @@
     waveformClear();
   }
 
-  /* ── Waveform oscilloscope ───────────────────────────────────────────── */
+  /* ── Waveform oscilloscope (ring-buffer, full-redraw each frame) ────── */
+  //
+  // drawImage-scroll is broken under DPR scaling — source coords are physical
+  // pixels but destination coords are CSS pixels after setTransform, so the
+  // canvas shifts the wrong amount and content piles up in one corner.
+  //
+  // Ring-buffer approach: store last WF_BUF samples, redraw the whole canvas
+  // every frame.  At 10 Hz on a phone browser this is negligible CPU cost.
 
   const wfCanvas = $('waveform');
-  const wfCtx = wfCanvas ? wfCanvas.getContext('2d') : null;
-  // Pixels scrolled left each time new data arrives (10 Hz → 40px/frame ≈ 400px/s)
-  const WF_SCROLL = 40;
-  // CSS colours matching app.css design tokens
-  const WF_BG    = '#0e1219';
-  const WF_LINE  = '#4f8cff';
-  const WF_GRID  = '#1c2230';
-  const WF_ZERO  = '#2a3242';
+  const wfCtx    = wfCanvas ? wfCanvas.getContext('2d') : null;
+  const WF_BUF   = 800;           // 80 pts/frame × 10 Hz = 1 s of history
+  const wfBuf    = new Float32Array(WF_BUF);
+  let   wfHead   = 0;             // next write slot (wraps at WF_BUF)
+
+  const WF_BG   = '#0e1219';
+  const WF_LINE = '#4f8cff';
+  const WF_CLIP = '#ff3b3b';
+  const WF_GRID = '#1c2230';
+  const WF_ZERO = '#2a3242';
 
   function waveformResize() {
     if (!wfCanvas || !wfCtx) return;
-    const dpr = window.devicePixelRatio || 1;
     const cssW = wfCanvas.clientWidth;
     const cssH = wfCanvas.clientHeight;
-    if (!cssW) return;
-    wfCanvas.width  = cssW * dpr;
-    wfCanvas.height = cssH * dpr;
-    // Use setTransform so repeated calls don't compound the scale
+    if (!cssW || !cssH) return;
+    const dpr = window.devicePixelRatio || 1;
+    const pw  = Math.floor(cssW * dpr);
+    const ph  = Math.floor(cssH * dpr);
+    if (wfCanvas.width === pw && wfCanvas.height === ph) return;
+    wfCanvas.width  = pw;
+    wfCanvas.height = ph;
+    // Reassert the DPR scale (setting .width resets the context transform).
     wfCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    waveformDrawGrid(cssW, cssH);
+    waveformDraw();
   }
 
-  function waveformDrawGrid(w, h) {
-    if (!wfCtx) return;
-    wfCtx.fillStyle = WF_BG;
-    wfCtx.fillRect(0, 0, w, h);
-    // Horizontal centre line
-    wfCtx.strokeStyle = WF_ZERO;
-    wfCtx.lineWidth = 1;
-    wfCtx.beginPath();
-    wfCtx.moveTo(0, h / 2);
-    wfCtx.lineTo(w, h / 2);
-    wfCtx.stroke();
-    // ±50% guide lines
-    wfCtx.strokeStyle = WF_GRID;
-    [0.25, 0.75].forEach((frac) => {
-      wfCtx.beginPath();
-      wfCtx.moveTo(0, h * frac);
-      wfCtx.lineTo(w, h * frac);
-      wfCtx.stroke();
-    });
-  }
-
-  function waveformClear() {
+  function waveformDraw() {
     if (!wfCtx || !wfCanvas) return;
     const dpr = window.devicePixelRatio || 1;
-    waveformDrawGrid(wfCanvas.width / dpr, wfCanvas.height / dpr);
+    const W   = wfCanvas.width  / dpr;   // CSS pixels
+    const H   = wfCanvas.height / dpr;
+    const mid = H / 2;
+
+    // Background + grid
+    wfCtx.fillStyle = WF_BG;
+    wfCtx.fillRect(0, 0, W, H);
+    wfCtx.lineWidth = 1;
+    [[WF_ZERO, mid], [WF_GRID, H * 0.25], [WF_GRID, H * 0.75]].forEach(([col, y]) => {
+      wfCtx.strokeStyle = col;
+      wfCtx.beginPath(); wfCtx.moveTo(0, y); wfCtx.lineTo(W, y); wfCtx.stroke();
+    });
+
+    // Check if any sample in the buffer is near clipping — turn line red.
+    let hasClip = false;
+    for (let i = 0; i < WF_BUF; i++) {
+      if (Math.abs(wfBuf[i]) >= 0.9) { hasClip = true; break; }
+    }
+
+    // Draw ring buffer oldest→newest mapped to left→right across full width.
+    wfCtx.strokeStyle = hasClip ? WF_CLIP : WF_LINE;
+    wfCtx.lineWidth   = 1.5;
+    wfCtx.lineJoin    = 'round';
+    wfCtx.beginPath();
+    for (let i = 0; i < WF_BUF; i++) {
+      const v = wfBuf[(wfHead + i) % WF_BUF];
+      const x = (i / (WF_BUF - 1)) * W;
+      const y = mid - v * mid * 0.88;
+      i === 0 ? wfCtx.moveTo(x, y) : wfCtx.lineTo(x, y);
+    }
+    wfCtx.stroke();
   }
 
   function waveformPush(points) {
-    if (!wfCtx || !wfCanvas || !points.length) return;
-    const dpr = window.devicePixelRatio || 1;
-    const W = wfCanvas.width  / dpr;
-    const H = wfCanvas.height / dpr;
-    const mid = H / 2;
-
-    // Shift existing content left by WF_SCROLL pixels.
-    // Destination MUST be in CSS units (context is scaled by dpr via setTransform).
-    wfCtx.drawImage(wfCanvas, -WF_SCROLL * dpr, 0, wfCanvas.width, wfCanvas.height,
-                              0, 0, W, H);
-
-    // Clear the right strip
-    wfCtx.fillStyle = WF_BG;
-    wfCtx.fillRect(W - WF_SCROLL - 1, 0, WF_SCROLL + 1, H);
-
-    // Redraw grid lines in the new strip
-    wfCtx.strokeStyle = WF_ZERO;
-    wfCtx.lineWidth = 1;
-    wfCtx.beginPath();
-    wfCtx.moveTo(W - WF_SCROLL, mid);
-    wfCtx.lineTo(W, mid);
-    wfCtx.stroke();
-    wfCtx.strokeStyle = WF_GRID;
-    [0.25, 0.75].forEach((frac) => {
-      wfCtx.beginPath();
-      wfCtx.moveTo(W - WF_SCROLL, H * frac);
-      wfCtx.lineTo(W, H * frac);
-      wfCtx.stroke();
-    });
-
-    // Draw new waveform samples in the right strip.
-    // Colour the line red if any sample is near clipping (>= 0.9 amplitude).
-    const nearClip = points.some((v) => Math.abs(v) >= 0.9);
-    wfCtx.strokeStyle = nearClip ? '#ff3b3b' : WF_LINE;
-    wfCtx.lineWidth = 1.5;
-    wfCtx.lineJoin = 'round';
-    wfCtx.beginPath();
-    const xStep = WF_SCROLL / (points.length - 1 || 1);
-    points.forEach((v, i) => {
-      const x = W - WF_SCROLL + i * xStep;
-      const y = mid - v * mid * 0.88;
-      i === 0 ? wfCtx.moveTo(x, y) : wfCtx.lineTo(x, y);
-    });
-    wfCtx.stroke();
+    if (!points || !points.length) return;
+    for (const v of points) {
+      wfBuf[wfHead] = v;
+      wfHead = (wfHead + 1) % WF_BUF;
+    }
+    waveformDraw();
   }
 
-  window.addEventListener('resize', waveformResize);
-  // Defer until layout is complete so clientWidth is non-zero
-  setTimeout(waveformResize, 0);
+  function waveformClear() {
+    wfBuf.fill(0);
+    wfHead = 0;
+    waveformDraw();
+  }
+
+  // ResizeObserver fires after layout so clientWidth is always valid.
+  if (wfCanvas) {
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(waveformResize).observe(wfCanvas);
+    } else {
+      window.addEventListener('resize', waveformResize);
+    }
+    waveformResize();
+    requestAnimationFrame(waveformResize);
+  }
 
   /* ── Transport state ─────────────────────────────────────────────────── */
 
