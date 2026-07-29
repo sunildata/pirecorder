@@ -248,11 +248,10 @@ audio { width: 100%; margin-top: 9px; height: 34px; }
 .waveform-canvas {
   display: block;
   width: 100%;
-  height: 80px;
+  height: 180px;
   border-radius: 8px;
   margin-top: 12px;
   background: #0e1219;
-  image-rendering: pixelated;
 }
 .waveform-label {
   font-size: 9px;

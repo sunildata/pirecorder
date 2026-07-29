@@ -72,7 +72,8 @@
     if (!cssW) return;
     wfCanvas.width  = cssW * dpr;
     wfCanvas.height = cssH * dpr;
-    wfCtx.scale(dpr, dpr);
+    // Use setTransform so repeated calls don't compound the scale
+    wfCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     waveformDrawGrid(cssW, cssH);
   }
 
@@ -110,11 +111,12 @@
     const H = wfCanvas.height / dpr;
     const mid = H / 2;
 
-    // Shift existing content left by WF_SCROLL pixels
+    // Shift existing content left by WF_SCROLL pixels.
+    // Destination MUST be in CSS units (context is scaled by dpr via setTransform).
     wfCtx.drawImage(wfCanvas, -WF_SCROLL * dpr, 0, wfCanvas.width, wfCanvas.height,
-                              0, 0, wfCanvas.width, wfCanvas.height);
+                              0, 0, W, H);
 
-    // Clear the right strip (accounting for DPR artefacts)
+    // Clear the right strip
     wfCtx.fillStyle = WF_BG;
     wfCtx.fillRect(W - WF_SCROLL - 1, 0, WF_SCROLL + 1, H);
 
@@ -133,8 +135,10 @@
       wfCtx.stroke();
     });
 
-    // Draw new waveform samples in the right strip
-    wfCtx.strokeStyle = WF_LINE;
+    // Draw new waveform samples in the right strip.
+    // Colour the line red if any sample is near clipping (>= 0.9 amplitude).
+    const nearClip = points.some((v) => Math.abs(v) >= 0.9);
+    wfCtx.strokeStyle = nearClip ? '#ff3b3b' : WF_LINE;
     wfCtx.lineWidth = 1.5;
     wfCtx.lineJoin = 'round';
     wfCtx.beginPath();
