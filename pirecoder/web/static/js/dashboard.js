@@ -63,9 +63,15 @@
 
   const wfCanvas = $('waveform');
   const wfCtx    = wfCanvas ? wfCanvas.getContext('2d') : null;
-  const WF_BUF   = 800;           // 80 pts/frame × 10 Hz = 1 s of history
+
+  // Storage is larger than the visible window so the eased read position can
+  // trail the write position without ever reading a slot already overwritten.
+  const WF_VIEW  = 800;           // 40 pts/frame × 20 Hz = 1 s visible
+  const WF_BUF   = 1200;          // 0.5 s of slack for the easing lag
   const wfBuf    = new Float32Array(WF_BUF);
-  let   wfHead   = 0;             // next write slot (wraps at WF_BUF)
+  let   wfTotal  = 0;             // monotonic count of samples ever written
+  let   wfShown  = 0;             // float; eases toward wfTotal each frame
+  let   wfDirty  = true;
 
   const WF_BG   = '#0e1219';
   const WF_LINE = '#4f8cff';
