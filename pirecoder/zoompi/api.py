@@ -131,7 +131,7 @@ def record_stop():
     queued = []
     wants_mp3 = "mp3" in config.get("output_format")
     wants_dsp = int(config.get("post_highpass_hz") or 0) > 0 or any(
-        config.get(k) for k in ("post_limiter", "post_compressor", "post_noise_gate")
+        config.get(k) for k in ("post_limiter", "post_compressor", "post_noise_gate", "post_normalize")
     )
     folder = RECORDINGS_DIR / session["folder"]
     for seg in session.get("segments", []):
@@ -405,6 +405,30 @@ def update_session(session_id: str):
 @login_required
 def system_info():
     return jsonify(system.snapshot())
+
+
+@api.post("/system/reboot")
+@login_required
+def system_reboot():
+    import subprocess, threading
+    def _do():
+        import time; time.sleep(1.5)
+        subprocess.run(["sudo", "reboot"], check=False)
+    threading.Thread(target=_do, daemon=True).start()
+    db.log_event("system_reboot", {"ip": request.remote_addr})
+    return jsonify({"ok": True, "message": "Rebooting in 1.5 s…"})
+
+
+@api.post("/system/shutdown")
+@login_required
+def system_shutdown():
+    import subprocess, threading
+    def _do():
+        import time; time.sleep(1.5)
+        subprocess.run(["sudo", "shutdown", "-h", "now"], check=False)
+    threading.Thread(target=_do, daemon=True).start()
+    db.log_event("system_shutdown", {"ip": request.remote_addr})
+    return jsonify({"ok": True, "message": "Shutting down in 1.5 s…"})
 
 
 @api.get("/system/events")

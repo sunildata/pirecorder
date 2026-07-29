@@ -46,6 +46,14 @@ def build_filter_chain() -> str:
             "acompressor=threshold=-18dB:ratio=3:attack=20:release=250:makeup=2"
         )
 
+    if config.get("post_normalize"):
+        lufs = int(config.get("post_normalize_lufs") or -16)
+        # Two-pass loudnorm is ideal but requires probing; single-pass is
+        # accurate enough for field recordings and completes in one ffmpeg call.
+        stages.append(
+            f"loudnorm=I={lufs}:TP=-1.5:LRA=11"
+        )
+
     if config.get("post_limiter"):
         stages.append("alimiter=limit=0.97:attack=5:release=50")
 

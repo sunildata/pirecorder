@@ -38,6 +38,9 @@ DEFAULTS: dict[str, Any] = {
     "dual_recording": False,       # simultaneous -12 dB safety take
     "output_format": "wav",        # wav | wav+mp3
     "mp3_bitrate": "192k",
+    "take_prefix": "",             # optional prefix prepended to every folder name
+    "auto_record_on_boot": False,  # start recording automatically on power-up
+    "pre_roll_seconds": 0,         # seconds of audio captured before Record press
     # ── Storage ─────────────────────────────────────────────────────────────
     "auto_cleanup": False,
     "cleanup_threshold_pct": 90,   # start deleting oldest above this usage
@@ -47,11 +50,13 @@ DEFAULTS: dict[str, Any] = {
     "post_limiter": False,
     "post_compressor": False,
     "post_noise_gate": False,
+    "post_normalize": False,       # LUFS loudness normalisation
+    "post_normalize_lufs": -16,    # target: -14 podcast, -16 streaming, -23 broadcast
     # ── Network ─────────────────────────────────────────────────────────────
     "wifi_mode": "auto",           # auto | ap | client
     "ap_ssid": "ZoomPi",
     "ap_password": "zoompi12345",
-    "ap_channel": 7,
+    "ap_channel": 7,               # Wi-Fi channel for the hosted hotspot (1–11)
     # ── Hardware add-ons ────────────────────────────────────────────────────
     "hardware_enabled": False,
     "gpio_record_button": 17,

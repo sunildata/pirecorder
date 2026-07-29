@@ -39,11 +39,27 @@
       </select>
     </div>
   </div>
+  <div class="field-row" id="mp3-options" style="display:none">
+    <div class="field">
+      <label>MP3 bitrate</label>
+      <select id="mp3_bitrate">
+        <option value="64k">64 kbps</option>
+        <option value="128k">128 kbps</option>
+        <option value="192k">192 kbps (default)</option>
+        <option value="256k">256 kbps</option>
+        <option value="320k">320 kbps</option>
+      </select>
+    </div>
+  </div>
 </div>
 
 <!-- Recording -->
 <div class="card">
   <div class="card-title">Recording</div>
+  <div class="field">
+    <label>Take name prefix</label>
+    <input type="text" id="take_prefix" placeholder="e.g. Interview_ or Session_" maxlength="40">
+  </div>
   <div class="field-row">
     <div class="field">
       <label>Auto-split size (MB, 0 = off)</label>
@@ -54,6 +70,17 @@
       <input type="number" id="auto_split_minutes" min="0" max="600" step="5">
     </div>
   </div>
+  <div class="field-row">
+    <div class="field">
+      <label>Pre-roll (seconds)</label>
+      <select id="pre_roll_seconds">
+        <option value="0">Off</option>
+        <option value="2">2 s</option>
+        <option value="5">5 s</option>
+        <option value="10">10 s</option>
+      </select>
+    </div>
+  </div>
   <div class="switch">
     <div class="switch-text"><strong>Recording lock</strong><span>Require confirmation before stopping</span></div>
     <label class="toggle"><input type="checkbox" id="recording_lock"><span class="toggle-track"></span></label>
@@ -61,6 +88,10 @@
   <div class="switch">
     <div class="switch-text"><strong>Dual recording</strong><span>Second take at −12 dB as clipping insurance</span></div>
     <label class="toggle"><input type="checkbox" id="dual_recording"><span class="toggle-track"></span></label>
+  </div>
+  <div class="switch">
+    <div class="switch-text"><strong>Auto-record on boot</strong><span>Start recording automatically when the device powers on</span></div>
+    <label class="toggle"><input type="checkbox" id="auto_record_on_boot"><span class="toggle-track"></span></label>
   </div>
 </div>
 
@@ -85,6 +116,18 @@
   <div class="switch">
     <div class="switch-text"><strong>Noise gate</strong><span>Suppress room noise between cues</span></div>
     <label class="toggle"><input type="checkbox" id="post_noise_gate"><span class="toggle-track"></span></label>
+  </div>
+  <div class="switch">
+    <div class="switch-text"><strong>Normalize</strong><span>Loudness normalisation after recording</span></div>
+    <label class="toggle"><input type="checkbox" id="post_normalize"><span class="toggle-track"></span></label>
+  </div>
+  <div class="field" id="normalize-lufs-row" style="display:none;margin-top:8px">
+    <label>Target loudness</label>
+    <select id="post_normalize_lufs">
+      <option value="-14">−14 LUFS — Podcast / YouTube</option>
+      <option value="-16">−16 LUFS — Streaming (Spotify / Apple)</option>
+      <option value="-23">−23 LUFS — Broadcast (EBU R128)</option>
+    </select>
   </div>
 </div>
 
@@ -123,6 +166,15 @@
   <div class="field-row">
     <div class="field"><label>Hotspot name</label><input type="text" id="ap_ssid" maxlength="32"></div>
     <div class="field"><label>Hotspot password</label><input type="text" id="ap_password" minlength="8" maxlength="63"></div>
+  </div>
+  <div class="field">
+    <label>Hotspot channel</label>
+    <select id="ap_channel">
+      <option value="1">Channel 1</option>
+      <option value="6">Channel 6</option>
+      <option value="7">Channel 7 (default)</option>
+      <option value="11">Channel 11</option>
+    </select>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     <button class="btn btn-ghost btn-sm" id="wifi-scan">Scan networks</button>
@@ -167,6 +219,21 @@
       <input type="password" id="new_password" placeholder="New password" autocomplete="new-password">
       <button class="btn btn-ghost btn-sm" id="save-password" style="flex:0 0 auto">Update</button>
     </div>
+  </div>
+</div>
+
+<!-- System -->
+<div class="card">
+  <div class="card-title">System</div>
+  <div class="stats" id="sys-info" style="margin-bottom:14px">
+    <div class="stat"><div class="stat-value" id="sys-ip">—</div><div class="stat-label">IP Address</div></div>
+    <div class="stat"><div class="stat-value" id="sys-host">—</div><div class="stat-label">Hostname</div></div>
+    <div class="stat"><div class="stat-value" id="sys-uptime">—</div><div class="stat-label">Uptime</div></div>
+    <div class="stat"><div class="stat-value" id="sys-temp">—</div><div class="stat-label">CPU °C</div></div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm" id="sys-reboot">↺ Reboot</button>
+    <button class="btn btn-ghost btn-sm sys-shutdown-btn" id="sys-shutdown">⏻ Shutdown</button>
   </div>
 </div>
 

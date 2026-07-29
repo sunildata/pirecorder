@@ -370,6 +370,15 @@ audio { width: 100%; margin-top: 9px; height: 34px; }
 .gain-unsupported .gain-ticks,
 .gain-unsupported .gain-presets { opacity: .35; pointer-events: none; }
 
+/* ── System card ─────────────────────────────────────────────────────── */
+.sys-shutdown-btn {
+  border-color: #c0392b !important;
+  color: #c0392b !important;
+}
+.sys-shutdown-btn:hover:not(:disabled) {
+  background: rgba(192,57,43,.12) !important;
+}
+
 /* ── Login ────────────────────────────────────────────────────────────── */
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
 .login-card { width: 100%; max-width: 340px; text-align: center; }

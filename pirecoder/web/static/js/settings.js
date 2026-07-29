@@ -6,15 +6,15 @@
 
   const NUMERIC = ['sample_rate', 'bit_depth', 'channels', 'auto_split_mb',
     'auto_split_minutes', 'cleanup_threshold_pct', 'min_free_mb',
-    'post_highpass_hz', 'gpio_record_button', 'gpio_stop_button',
-    'gpio_status_led'];
+    'post_highpass_hz', 'post_normalize_lufs', 'pre_roll_seconds',
+    'gpio_record_button', 'gpio_stop_button', 'gpio_status_led', 'ap_channel'];
 
   const BOOLEAN = ['recording_lock', 'dual_recording', 'auto_cleanup',
-    'post_limiter', 'post_compressor', 'post_noise_gate',
-    'hardware_enabled', 'oled_enabled', 'auth_enabled'];
+    'post_limiter', 'post_compressor', 'post_noise_gate', 'post_normalize',
+    'auto_record_on_boot', 'hardware_enabled', 'oled_enabled', 'auth_enabled'];
 
-  const TEXT = ['device_name', 'audio_device', 'output_format',
-    'wifi_mode', 'ap_ssid', 'ap_password'];
+  const TEXT = ['device_name', 'audio_device', 'output_format', 'mp3_bitrate',
+    'take_prefix', 'wifi_mode', 'ap_ssid', 'ap_password'];
 
   const ALL = [...NUMERIC, ...BOOLEAN, ...TEXT];
 
@@ -201,6 +201,51 @@
     } catch (err) { ZP.toast(err.message, 'error'); }
   });
 
+  /* ── Conditional field visibility ───────────────────────────────────────── */
+
+  function syncMp3Options() {
+    const show = $('output_format')?.value === 'wav+mp3';
+    const row = $('mp3-options');
+    if (row) row.style.display = show ? '' : 'none';
+  }
+
+  function syncNormalizeLufs() {
+    const show = $('post_normalize')?.checked;
+    const row = $('normalize-lufs-row');
+    if (row) row.style.display = show ? '' : 'none';
+  }
+
+  $('output_format')?.addEventListener('change', syncMp3Options);
+  $('post_normalize')?.addEventListener('change', syncNormalizeLufs);
+
+  /* ── System info ─────────────────────────────────────────────────────────── */
+
+  async function loadSystemInfo() {
+    try {
+      const s = await ZP.api('/system');
+      if ($('sys-ip'))     $('sys-ip').textContent     = s.ip || '—';
+      if ($('sys-host'))   $('sys-host').textContent   = s.hostname || '—';
+      if ($('sys-uptime')) $('sys-uptime').textContent = s.uptime?.human || '—';
+      if ($('sys-temp'))   $('sys-temp').textContent   = s.cpu_temp_c != null ? `${s.cpu_temp_c}°` : '—';
+    } catch (e) { /* non-fatal */ }
+  }
+
+  $('sys-reboot')?.addEventListener('click', async () => {
+    if (!confirm('Reboot the device now?')) return;
+    try {
+      const res = await ZP.api('/system/reboot', { method: 'POST' });
+      ZP.toast(res.message || 'Rebooting…', 'ok');
+    } catch (err) { ZP.toast(err.message, 'error'); }
+  });
+
+  $('sys-shutdown')?.addEventListener('click', async () => {
+    if (!confirm('Shut down the device? You will need physical access to restart.')) return;
+    try {
+      const res = await ZP.api('/system/shutdown', { method: 'POST' });
+      ZP.toast(res.message || 'Shutting down…', 'ok');
+    } catch (err) { ZP.toast(err.message, 'error'); }
+  });
+
   /* ── Recording lock warning ──────────────────────────────────────────── */
 
   ZP.on('status', (s) => {
@@ -218,6 +263,10 @@
       : 'gpiozero not installed';
   }).catch(() => {});
 
-  load().catch((err) => ZP.toast(err.message, 'error'));
+  load().catch((err) => ZP.toast(err.message, 'error')).then(() => {
+    syncMp3Options();
+    syncNormalizeLufs();
+  });
+  loadSystemInfo();
   wifiState();
 })();
