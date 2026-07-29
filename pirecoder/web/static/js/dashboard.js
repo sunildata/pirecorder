@@ -328,6 +328,16 @@
       : `${percent}% · ${db > 0 ? '+' : ''}${db.toFixed(1)} dB`;
   }
 
+  function syncGainPresetButtons(percent) {
+    document.querySelectorAll('[data-gain]').forEach((btn) => {
+      btn.classList.toggle('active', parseInt(btn.dataset.gain, 10) === percent);
+    });
+  }
+
+  function setGainSliderFill(percent) {
+    if (gainSlider) gainSlider.style.setProperty('--fill', `${percent}%`);
+  }
+
   function applyGainUi(res) {
     gainSupported = !!res.supported;
     const card = $('gain-card');
@@ -335,6 +345,7 @@
     if (gainSlider) {
       gainSlider.disabled = !gainSupported;
       gainSlider.value = res.percent ?? 0;
+      setGainSliderFill(res.percent ?? 0);
     }
     if (gainValue) {
       gainValue.textContent = gainSupported ? gainLabel(res.percent, res.db) : '—';
@@ -345,6 +356,7 @@
         : (res.reason || 'This interface has no software input gain — '
                        + 'use its hardware gain knob.');
     }
+    syncGainPresetButtons(res.percent ?? 0);
   }
 
   async function sendGain(percent) {
@@ -372,12 +384,25 @@
     }
   }
 
+  const GAIN_SNAP_POINTS = [0, 25, 50, 75, 100];
+  const GAIN_SNAP_ZONE  = 3; // ±% to snap
+
+  function snapGain(raw) {
+    for (const p of GAIN_SNAP_POINTS) {
+      if (Math.abs(raw - p) <= GAIN_SNAP_ZONE) return p;
+    }
+    return raw;
+  }
+
   if (gainSlider) {
     gainSlider.addEventListener('input', () => {
-      // Optimistic label while dragging; the read-back corrects it after.
-      if (gainValue) gainValue.textContent = `${gainSlider.value}%`;
+      const snapped = snapGain(parseInt(gainSlider.value, 10));
+      gainSlider.value = snapped;
+      setGainSliderFill(snapped);
+      syncGainPresetButtons(snapped);
+      if (gainValue) gainValue.textContent = `${snapped}%`;
       clearTimeout(gainDebounce);
-      gainDebounce = setTimeout(() => sendGain(parseInt(gainSlider.value, 10)), 150);
+      gainDebounce = setTimeout(() => sendGain(snapped), 150);
     });
   }
 
@@ -385,8 +410,9 @@
     btn.addEventListener('click', () => {
       if (!gainSupported) { ZP.toast('No software input gain on this interface', 'error'); return; }
       const percent = parseInt(btn.dataset.gain, 10);
-      if (gainSlider) gainSlider.value = percent;
+      if (gainSlider) { gainSlider.value = percent; setGainSliderFill(percent); }
       if (gainValue)  gainValue.textContent = `${percent}%`;
+      syncGainPresetButtons(percent);
       clearTimeout(gainDebounce);
       sendGain(percent);
     });
