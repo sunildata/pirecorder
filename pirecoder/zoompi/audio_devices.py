@@ -141,98 +141,117 @@ def negotiate_format(
     return rate, depth, channels
 
 
-# Common capture control names, ordered most-specific first.
-_CAPTURE_CONTROLS = [
-    "Mic", "Mic Boost", "Mic Gain", "Mic Volume",
-    "Capture", "Capture Volume",
-    "Input", "Input Volume",
-    "ADC", "ADC Level",
-    "Line In", "Line",
-    "PCM Capture Source",
-    "Digital",
-]
+# ── Input gain (ALSA capture volume) ─────────────────────────────────────────
+#
+# Gain is driven as a *percentage* of the control's own range, never as a dB
+# string. Every ALSA volume control accepts "70%", while dB is only supported
+# by some — and a negative argument such as "-10dB" is liable to be parsed as
+# a command-line option. The dB figure the device reports is read back and
+# shown to the user, but it is never used to command a change.
+#
+# Only controls advertising `cvolume` (a capture volume) qualify. Blindly
+# poking likely-sounding names is what made the previous version report
+# success while nothing changed: a name such as "Digital" often resolves to a
+# playback control, which accepts the value happily and leaves input gain
+# untouched.
+
+_CONTROL_NAME_RE = re.compile(r"Simple mixer control '([^']+)',\d+")
+_CAPABILITIES_RE = re.compile(r"Capabilities:(.*)")
+_CAPTURE_LIMITS_RE = re.compile(r"Capture (\d+) - (\d+)")
+# Anchored on "Capture" so a control exposing both playback and capture on one
+# line (e.g. "Playback 20 [64%] ... Capture 15 [48%] ...") yields the capture
+# figures rather than the playback ones.
+_CAPTURE_VALUE_RE = re.compile(
+    r"Capture (\d+) \[(\d+)%\](?:\s*\[([+-]?\d+(?:\.\d+)?)dB\])?"
+)
+
+# Name fragments that suggest an input gain, best first.
+_GAIN_NAME_HINTS = ("mic", "capture", "input", "gain", "adc", "line")
 
 
-def _amixer_sset(card: int, control: str, value: str) -> bool:
-    """amixer sset — the correct command for named SimpleControls."""
-    rc, _, _ = _run(["amixer", "-c", str(card), "sset", control, value])
-    return rc == 0
+@dataclass
+class CaptureControl:
+    """An ALSA capture volume control and its current state."""
+
+    name: str
+    raw: int
+    raw_min: int
+    raw_max: int
+    percent: int
+    db: float | None = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
-def discover_capture_controls(device: AudioDevice) -> list[dict]:
-    """Return all mixer controls on the card that have capture capability.
-
-    Each entry: {"name": str, "db_value": int|None, "pct_value": int|None}
-    """
+def list_capture_controls(device: AudioDevice) -> list[CaptureControl]:
+    """Every control on the card that can act as an input gain."""
     rc, out, _ = _run(["amixer", "-c", str(device.card)])
     if rc != 0:
         return []
 
-    controls: list[dict] = []
-    current: dict = {}
-
-    for line in out.splitlines():
-        line = line.strip()
-        m = re.match(r"Simple mixer control '([^']+)',\d+", line)
-        if m:
-            if current.get("has_capture"):
-                controls.append({
-                    "name": current["name"],
-                    "db_value":  current.get("db_value"),
-                    "pct_value": current.get("pct_value"),
-                })
-            current = {"name": m.group(1), "has_capture": False}
-        elif current:
-            if "cvolume" in line or "cswitch" in line:
-                current["has_capture"] = True
-            if current.get("has_capture"):
-                db_m = re.search(r"\[([+-]?\d+(?:\.\d+)?)dB\]", line)
-                if db_m and "db_value" not in current:
-                    current["db_value"] = round(float(db_m.group(1)))
-                pct_m = re.search(r"\[(\d+)%\]", line)
-                if pct_m and "pct_value" not in current:
-                    current["pct_value"] = int(pct_m.group(1))
-
-    if current.get("has_capture"):
-        controls.append({
-            "name": current["name"],
-            "db_value":  current.get("db_value"),
-            "pct_value": current.get("pct_value"),
-        })
-
+    controls: list[CaptureControl] = []
+    # Split on the control header so each block is one control.
+    for block in re.split(r"(?=Simple mixer control )", out):
+        name_m = _CONTROL_NAME_RE.search(block)
+        if not name_m:
+            continue
+        caps = _CAPABILITIES_RE.search(block)
+        if not caps or "cvolume" not in caps.group(1):
+            continue  # no capture volume — cannot serve as a gain
+        limits = _CAPTURE_LIMITS_RE.search(block)
+        value = _CAPTURE_VALUE_RE.search(block)
+        if not limits or not value:
+            continue
+        controls.append(
+            CaptureControl(
+                name=name_m.group(1),
+                raw=int(value.group(1)),
+                raw_min=int(limits.group(1)),
+                raw_max=int(limits.group(2)),
+                percent=int(value.group(2)),
+                db=float(value.group(3)) if value.group(3) else None,
+            )
+        )
     return controls
 
 
-def get_capture_gain(device: AudioDevice) -> int | None:
-    """Read current capture gain in dB.  Returns None if no control found."""
-    controls = discover_capture_controls(device)
-    for c in controls:
-        if c.get("db_value") is not None:
-            return c["db_value"]
-    # Percentage-only controls: convert 0-100 % → roughly -10..+40 dB scale
-    for c in controls:
-        if c.get("pct_value") is not None:
-            return round(c["pct_value"] / 100 * 50 - 10)
-    return None
+def _gain_preference(control: CaptureControl) -> int:
+    low = control.name.lower()
+    for i, hint in enumerate(_GAIN_NAME_HINTS):
+        if hint in low:
+            return i
+    return len(_GAIN_NAME_HINTS)
 
 
-def set_capture_gain(device: AudioDevice, gain_db: int) -> bool:
-    """Set capture gain via amixer sset.
+def find_capture_control(device: AudioDevice) -> CaptureControl | None:
+    """The most likely input-gain control, or None if the device has none."""
+    controls = list_capture_controls(device)
+    if not controls:
+        return None
+    return sorted(controls, key=_gain_preference)[0]
 
-    Tries every discovered capture control, then the known-name fallback list.
-    For each control tries the dB string first, then a percentage equivalent
-    (some devices only accept one format).
+
+def get_capture_gain(device: AudioDevice) -> CaptureControl | None:
+    """Current input gain state, or None when gain is analogue-only."""
+    return find_capture_control(device)
+
+
+def set_capture_gain(device: AudioDevice, percent: int) -> CaptureControl | None:
+    """Set input gain to `percent` of the control's range.
+
+    Returns the control re-read from the hardware afterwards — the only
+    trustworthy confirmation that anything actually moved. None means the
+    device exposes no capture volume at all.
     """
-    pct = max(0, min(100, round((gain_db + 10) / 50 * 100)))
+    control = find_capture_control(device)
+    if control is None:
+        return None
 
-    # Prefer controls the device actually reports as having capture capability.
-    discovered = [c["name"] for c in discover_capture_controls(device)]
-    all_controls = discovered + [n for n in _CAPTURE_CONTROLS if n not in discovered]
+    percent = max(0, min(100, int(percent)))
+    _run(["amixer", "-c", str(device.card), "sset", control.name, f"{percent}%"])
 
-    for name in all_controls:
-        if _amixer_sset(device.card, name, f"{gain_db}dB"):
-            return True
-        if _amixer_sset(device.card, name, f"{pct}%"):
-            return True
-
-    return False
+    for updated in list_capture_controls(device):
+        if updated.name == control.name:
+            return updated
+    return None

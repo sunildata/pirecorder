@@ -51,24 +51,24 @@
 <div class="card" id="gain-card">
   <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
     <span>Input Gain</span>
-    <span class="gain-value" id="gain-db-label">0 dB</span>
+    <span class="gain-value" id="gain-value">—</span>
   </div>
 
   <div class="gain-row">
     <span class="gain-icon">−</span>
-    <input type="range" id="gain-slider" class="gain-slider" min="-10" max="40" step="1" value="0">
+    <input type="range" id="gain-slider" class="gain-slider" min="0" max="100" step="1" value="0">
     <span class="gain-icon">+</span>
   </div>
   <div class="gain-ticks">
-    <span>−10</span><span>0</span><span>+10</span><span>+20</span><span>+30</span><span>+40 dB</span>
+    <span>0</span><span>25</span><span>50</span><span>75</span><span>100%</span>
   </div>
 
   <div class="gain-presets">
-    <button class="btn btn-ghost btn-sm" data-gain="0">0 dB</button>
-    <button class="btn btn-ghost btn-sm" data-gain="10">+10</button>
-    <button class="btn btn-ghost btn-sm" data-gain="20">+20</button>
-    <button class="btn btn-ghost btn-sm" data-gain="30">+30</button>
-    <button class="btn btn-ghost btn-sm" data-gain="40">+40</button>
+    <button class="btn btn-ghost btn-sm" data-gain="0">0%</button>
+    <button class="btn btn-ghost btn-sm" data-gain="25">25%</button>
+    <button class="btn btn-ghost btn-sm" data-gain="50">50%</button>
+    <button class="btn btn-ghost btn-sm" data-gain="75">75%</button>
+    <button class="btn btn-ghost btn-sm" data-gain="100">100%</button>
   </div>
 
   <div id="gain-status" class="gain-status"></div>

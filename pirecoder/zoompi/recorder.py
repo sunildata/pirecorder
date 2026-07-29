@@ -393,7 +393,14 @@ class Recorder:
             "-r", str(session.sample_rate),
             "-c", str(session.channels),
             "-t", "wav",
-            "--buffer-size=192000",   # ~1 s at 48 kHz stereo 16-bit
+            # Buffer and period are separate concerns. The buffer is the safety
+            # margin against scheduling hiccups; the period is how often bytes
+            # actually reach the file. A large period is what made live metering
+            # lag ~1 s behind, so keep a 1 s buffer but flush every 50 ms.
+            # (Units are microseconds. The previous --buffer-size took *frames*,
+            # so 192000 was 4 s at 48 kHz, not the 1 s intended.)
+            "--buffer-time=1000000",
+            "--period-time=50000",
             str(path),
         ]
 

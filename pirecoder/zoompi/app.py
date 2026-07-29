@@ -76,11 +76,18 @@ def settings():
 class Broadcaster:
     """Pushes status + levels to connected clients.
 
-    Runs at two rates: levels at 10 Hz while recording (the VU meter needs to
-    feel live), and the heavier system snapshot every 5 seconds. Clients that
-    miss frames simply render the next one — nothing here is stateful, which
-    is what lets a phone reconnect mid-take and immediately show the truth.
+    Runs at two rates: levels at 20 Hz while recording — matching the meter's
+    poll rate so no frame is dropped, which is what makes the waveform feel
+    live rather than laggy — and the heavier system snapshot every 5 seconds.
+    Clients that miss frames simply render the next one; nothing here is
+    stateful, which is what lets a phone reconnect mid-take and immediately
+    show the truth.
     """
+
+    # Must match LevelMeter's poll rate, or half the waveform frames are
+    # produced and then thrown away.
+    LEVELS_INTERVAL = 0.05
+    IDLE_INTERVAL = 0.5
 
     def __init__(self, recorder: Recorder, meter: LevelMeter) -> None:
         self._recorder = recorder
@@ -100,7 +107,7 @@ class Broadcaster:
 
     def _run(self) -> None:
         last_system = 0.0
-        while not self._stop.wait(0.1):
+        while not self._stop.wait(self.LEVELS_INTERVAL):
             try:
                 status = self._recorder.status()
                 recording = status.get("is_recording")
@@ -109,10 +116,10 @@ class Broadcaster:
                     socketio.emit(
                         "levels", {"levels": self._meter.read(), "status": status}
                     )
-                    time.sleep(0.0)  # yield; the 0.1 s wait paces us at ~10 Hz
                 else:
                     socketio.emit("status", status)
-                    self._stop.wait(0.4)  # idle clients don't need 10 Hz
+                    # Idle clients don't need 20 Hz; top up to the idle rate.
+                    self._stop.wait(self.IDLE_INTERVAL - self.LEVELS_INTERVAL)
 
                 now = time.time()
                 if now - last_system >= 5.0:

@@ -185,53 +185,74 @@ def reset_clip():
     return jsonify({"ok": True})
 
 
+def _gain_payload(control, supported: bool) -> dict:
+    """Uniform gain response. `percent` is authoritative; `db` is informational
+    and only present when the hardware reports it."""
+    if control is None:
+        return {"supported": supported, "percent": 0, "db": None, "control": None}
+    return {
+        "supported": True,
+        "percent": control.percent,
+        "db": control.db,
+        "control": control.name,
+    }
+
+
 @api.get("/gain")
 @login_required
 def get_gain():
-    # probe=False: fast card lookup, no arecord format tests needed for gain.
+    # probe=False: fast card lookup — the arecord format tests aren't needed
+    # for mixer access and made every slider move take seconds.
     dev = audio_devices.select_device(config.get("audio_device"), probe=False)
     if not dev:
-        return jsonify({"gain_db": 0, "supported": False, "controls": []})
-    controls = audio_devices.discover_capture_controls(dev)
-    gain = audio_devices.get_capture_gain(dev)
-    return jsonify({
-        "gain_db":  gain if gain is not None else 0,
-        "supported": gain is not None or bool(controls),
-        "controls": [c["name"] for c in controls],
-    })
+        return jsonify(_gain_payload(None, False))
+    return jsonify(_gain_payload(audio_devices.get_capture_gain(dev), False))
 
 
 @api.post("/gain")
 @login_required
 def set_gain():
-    gain_db = _body().get("gain_db")
-    if gain_db is None:
-        return jsonify({"error": "gain_db is required"}), 400
+    percent = _body().get("percent")
+    if percent is None:
+        return jsonify({"error": "percent is required"}), 400
     try:
-        gain_db = int(gain_db)
+        percent = int(percent)
     except (ValueError, TypeError):
-        return jsonify({"error": "gain_db must be an integer"}), 400
-    gain_db = max(-10, min(40, gain_db))
+        return jsonify({"error": "percent must be an integer"}), 400
+    percent = max(0, min(100, percent))
+
     dev = audio_devices.select_device(config.get("audio_device"), probe=False)
     if not dev:
         return jsonify({"error": "No audio device found"}), 404
-    ok = audio_devices.set_capture_gain(dev, gain_db)
-    # Read back the actual value so the UI always shows truth.
-    actual = audio_devices.get_capture_gain(dev) if ok else gain_db
-    return jsonify({"ok": ok, "gain_db": actual if actual is not None else gain_db, "supported": ok})
+
+    control = audio_devices.set_capture_gain(dev, percent)
+    if control is None:
+        return jsonify({
+            **_gain_payload(None, False),
+            "ok": False,
+            "reason": "This interface has no software capture volume — "
+                      "its input gain is analogue only.",
+        })
+
+    payload = _gain_payload(control, True)
+    # The device may quantise to its own step size, so treat "close enough"
+    # as success rather than reporting a failure the user cannot act on.
+    payload["ok"] = abs(control.percent - percent) <= 5
+    payload["requested"] = percent
+    return jsonify(payload)
 
 
 @api.get("/gain/controls")
 @login_required
 def gain_controls():
-    """Debug endpoint: lists all capture controls amixer reports for the device."""
+    """Diagnostics: every capture volume control amixer reports for the device."""
     dev = audio_devices.select_device(config.get("audio_device"), probe=False)
     if not dev:
         return jsonify({"error": "No audio device found", "controls": []}), 404
     return jsonify({
         "device": dev.name,
         "card": dev.card,
-        "controls": audio_devices.discover_capture_controls(dev),
+        "controls": [c.to_dict() for c in audio_devices.list_capture_controls(dev)],
     })
 
 

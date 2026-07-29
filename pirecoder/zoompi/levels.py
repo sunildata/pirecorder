@@ -1,12 +1,17 @@
 """Live level metering.
 
-Metering reads the tail of the WAV file `arecord` is currently writing.
-That keeps the capture path completely untouched — an alternative such as
-`tee`-ing the PCM stream through Python would put the recording at the mercy
-of the GIL, which the reliability requirement rules out.
+Metering reads the WAV file `arecord` is currently writing. That keeps the
+capture path completely untouched — an alternative such as `tee`-ing the PCM
+stream through Python would put the recording at the mercy of the GIL, which
+the reliability requirement rules out.
 
-The cost is roughly one small pread per poll; on a Pi 3 that is well under
-1% CPU at 10 Hz.
+Reads are *continuous*: each poll picks up exactly where the last one stopped,
+so no audio is skipped and the waveform is a faithful, gap-free picture of the
+signal. If the reader ever falls behind (a busy Pi, a stalled poll) it skips
+forward to the newest audio rather than replaying stale bytes — staying live
+matters more than showing every sample.
+
+The cost is one small pread per poll; on a Pi 3 that is well under 1% CPU.
 """
 
 from __future__ import annotations
@@ -29,6 +34,14 @@ SILENCE_DBFS = -90.0
 # meter and keeps the cost flat regardless of sample rate.
 RMS_SAMPLE_TARGET = 1200
 
+# Waveform points published per poll. The browser stitches consecutive frames
+# into a scrolling oscilloscope, so this is resolution-per-frame, not total.
+WAVEFORM_POINTS = 60
+
+# If the reader falls this far behind the write head, skip forward instead of
+# working through the backlog — a live meter must never drift.
+MAX_LAG_SECONDS = 0.25
+
 
 def _to_dbfs(amplitude: float) -> float:
     """Linear 0..1 amplitude to dBFS, floored at SILENCE_DBFS."""
@@ -40,7 +53,7 @@ def _to_dbfs(amplitude: float) -> float:
 class LevelMeter:
     """Polls the active recording file and publishes RMS/peak per channel."""
 
-    def __init__(self, recorder, poll_hz: float = 10.0) -> None:
+    def __init__(self, recorder, poll_hz: float = 20.0) -> None:
         self._recorder = recorder
         self._interval = 1.0 / poll_hz
         self._lock = threading.Lock()
@@ -51,6 +64,11 @@ class LevelMeter:
         self._peak_hold = [0.0, 0.0]
         self._peak_hold_at = [0.0, 0.0]
         self._clip_latched = [False, False]
+
+        # Continuous-read cursor. Reset whenever the segment file changes
+        # (auto-split, new take) so we never read across file boundaries.
+        self._read_path: Path | None = None
+        self._read_pos = 0
 
     @staticmethod
     def _empty() -> dict:
@@ -102,23 +120,27 @@ class LevelMeter:
         if path is None or session is None or not status.get("is_recording"):
             with self._lock:
                 self._levels = self._empty()
+            self._read_path = None
             return
 
         channels = int(session["channels"])
         depth = int(session["bit_depth"])
         rate = int(session["sample_rate"])
         width = depth // 8
-
-        # ~50 ms window, aligned to a whole frame.
         frame = channels * width
-        window = max(frame, int(rate * 0.05) * frame)
 
-        chunk = self._read_tail(path, window, frame)
+        chunk = self._read_new(path, frame, max_bytes=int(rate * MAX_LAG_SECONDS) * frame)
         if not chunk:
             return
 
-        peaks, rms = self._analyse(chunk, channels, width)
-        waveform = self._make_waveform(chunk, channels, width)
+        # Decode once and share — at 20 Hz a second pass would double the CPU
+        # cost, and 24-bit decoding runs a Python-level loop.
+        samples = self._decode(chunk, width)
+        if not samples:
+            return
+
+        peaks, rms = self._analyse(samples, channels, width)
+        waveform = self._make_waveform(samples, channels, width)
         now = time.time()
 
         with self._lock:
@@ -143,9 +165,16 @@ class LevelMeter:
                 "waveform": waveform,
             }
 
-    @staticmethod
-    def _read_tail(path: Path, window: int, frame: int) -> bytes:
-        """Read the last `window` bytes, snapped to a frame boundary."""
+    def _read_new(self, path: Path, frame: int, max_bytes: int) -> bytes:
+        """Read every byte written since the last poll, frame-aligned.
+
+        Continuity is what makes the waveform look like the real signal: the
+        previous implementation read a fixed-size tail on each poll, which
+        silently dropped the audio between polls.
+
+        If more than `max_bytes` is pending, the cursor jumps to the newest
+        audio — a live meter should show *now*, not catch up on the past.
+        """
         try:
             size = path.stat().st_size
         except OSError:
@@ -153,30 +182,39 @@ class LevelMeter:
         if size <= WAV_HEADER_SIZE + frame:
             return b""
 
-        available = size - WAV_HEADER_SIZE
-        take = min(window, available)
+        # New segment (auto-split or new take): start at the write head.
+        if self._read_path != path:
+            self._read_path = path
+            self._read_pos = max(WAV_HEADER_SIZE, size - max_bytes)
+
+        start = max(self._read_pos, WAV_HEADER_SIZE)
+        if size - start > max_bytes:
+            start = size - max_bytes          # fell behind — skip stale audio
+        start -= (start - WAV_HEADER_SIZE) % frame   # align to a frame boundary
+
+        take = size - start
         take -= take % frame
         if take <= 0:
             return b""
 
-        offset = size - take
         try:
             fd = os.open(str(path), os.O_RDONLY)
             try:
-                return os.pread(fd, take, offset)
+                data = os.pread(fd, take, start)
             finally:
                 os.close(fd)
         except OSError:
             return b""
 
-    @classmethod
-    def _make_waveform(cls, chunk: bytes, channels: int, width: int, n_points: int = 80) -> list[float]:
-        """Return n_points oscilloscope samples (−1..1) from the left channel for display."""
-        samples = cls._decode(chunk, width)
-        if not samples:
-            return []
+        self._read_pos = start + len(data)
+        return data
+
+    @staticmethod
+    def _make_waveform(
+        samples: array, channels: int, width: int, n_points: int = WAVEFORM_POINTS
+    ) -> list[float]:
+        """Return n_points oscilloscope samples (−1..1) from the left channel."""
         full_scale = float(1 << (width * 8 - 1))
-        # Use left channel (or mono)
         stride = channels if channels >= 2 else 1
         mono = samples[0::stride]
         if not mono:
@@ -194,17 +232,15 @@ class LevelMeter:
                 result.append(round(float(peak) / full_scale, 3))
         return result
 
-    @classmethod
-    def _analyse(cls, chunk: bytes, channels: int, width: int) -> tuple[list[float], list[float]]:
+    @staticmethod
+    def _analyse(
+        samples: array, channels: int, width: int
+    ) -> tuple[list[float], list[float]]:
         """Return per-channel (peak, rms) normalised to 0..1.
 
         Implemented on `array` rather than `audioop`, which PEP 594 removed
         in Python 3.13 — the version Raspberry Pi OS now ships.
         """
-        samples = cls._decode(chunk, width)
-        if not samples:
-            return [0.0, 0.0], [0.0, 0.0]
-
         full_scale = float(1 << (width * 8 - 1))
         peaks: list[float] = []
         rms: list[float] = []

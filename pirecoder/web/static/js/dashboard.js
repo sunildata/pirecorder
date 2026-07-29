@@ -63,9 +63,13 @@
 
   const wfCanvas = $('waveform');
   const wfCtx    = wfCanvas ? wfCanvas.getContext('2d') : null;
-  const WF_BUF   = 800;           // 80 pts/frame × 10 Hz = 1 s of history
+  // Server sends 60 points per frame at 20 Hz = 1200 pts/s.
+  // 600 slots therefore shows a 0.5 s window, so the display scrolls its full
+  // width twice a second — that is what reads as "live" to the eye.
+  const WF_BUF   = 600;
   const wfBuf    = new Float32Array(WF_BUF);
   let   wfHead   = 0;             // next write slot (wraps at WF_BUF)
+  let   wfPendingFrame = false;   // rAF coalescing guard
 
   const WF_BG   = '#0e1219';
   const WF_LINE = '#4f8cff';
@@ -125,13 +129,25 @@
     wfCtx.stroke();
   }
 
+  // Coalesce to one repaint per display frame. Samples are never dropped —
+  // they all land in the ring buffer — only redundant redraws are skipped if
+  // several socket frames arrive within a single screen refresh.
+  function waveformSchedule() {
+    if (wfPendingFrame) return;
+    wfPendingFrame = true;
+    requestAnimationFrame(() => {
+      wfPendingFrame = false;
+      waveformDraw();
+    });
+  }
+
   function waveformPush(points) {
     if (!points || !points.length) return;
     for (const v of points) {
       wfBuf[wfHead] = v;
       wfHead = (wfHead + 1) % WF_BUF;
     }
-    waveformDraw();
+    waveformSchedule();
   }
 
   function waveformClear() {
@@ -296,91 +312,90 @@
 
   /* ── Input Gain control ──────────────────────────────────────────────── */
 
-  const gainSlider    = $('gain-slider');
-  const gainDbLabel   = $('gain-db-label');
-  const gainStatus    = $('gain-status');
-  let gainSupported   = false;
-  let gainDebounce    = null;
-  let gainPending     = false;   // true while an API call is in-flight
+  // Gain is driven in percent because that is what every ALSA capture control
+  // understands. The dB figure is shown alongside when the device reports one.
+  const gainSlider  = $('gain-slider');
+  const gainValue   = $('gain-value');
+  const gainStatus  = $('gain-status');
+  let gainSupported = false;
+  let gainDebounce  = null;
+  let gainInFlight  = false;
+  let gainQueued    = null;      // most recent value while a call is running
 
-  function gainLabel(v) {
-    const n = parseInt(v, 10);
-    return n >= 0 ? `+${n} dB` : `${n} dB`;
+  function gainLabel(percent, db) {
+    return db === null || db === undefined
+      ? `${percent}%`
+      : `${percent}% · ${db > 0 ? '+' : ''}${db.toFixed(1)} dB`;
   }
 
-  function applyGainUi(gain_db, supported, hint = '') {
-    gainSupported = supported;
+  function applyGainUi(res) {
+    gainSupported = !!res.supported;
     const card = $('gain-card');
-    if (card) card.classList.toggle('gain-unsupported', !supported);
-    if (gainSlider) gainSlider.disabled = !supported;
-    // Always update the slider to the actual device value so UI = reality.
-    if (gainSlider)  gainSlider.value = gain_db;
-    if (gainDbLabel) gainDbLabel.textContent = gainLabel(gain_db);
+    if (card) card.classList.toggle('gain-unsupported', !gainSupported);
+    if (gainSlider) {
+      gainSlider.disabled = !gainSupported;
+      gainSlider.value = res.percent ?? 0;
+    }
+    if (gainValue) {
+      gainValue.textContent = gainSupported ? gainLabel(res.percent, res.db) : '—';
+    }
     if (gainStatus) {
-      if (supported) {
-        gainStatus.textContent = hint;
-      } else {
-        gainStatus.textContent =
-          'Gain control not available for this device — '
-          + 'check Settings → Audio Device or use the hardware knob.';
-      }
+      gainStatus.textContent = gainSupported
+        ? (res.control ? `ALSA control: ${res.control}` : '')
+        : (res.reason || 'This interface has no software input gain — '
+                       + 'use its hardware gain knob.');
     }
   }
 
-  async function sendGain(db) {
-    if (gainPending) return;   // drop if previous call still running
-    gainPending = true;
-    if (gainStatus) gainStatus.textContent = 'Applying…';
+  async function sendGain(percent) {
+    // Coalesce: keep only the newest target while a request is in flight so
+    // dragging the slider never queues a backlog of amixer calls.
+    if (gainInFlight) { gainQueued = percent; return; }
+    gainInFlight = true;
     try {
-      const res = await ZP.api('/gain', { method: 'POST', body: { gain_db: db } });
-      if (res.ok) {
-        // Use the read-back value — it may differ from requested if the device
-        // clamped or rounded it.
-        const actual = res.gain_db;
-        if (gainSlider)  gainSlider.value = actual;
-        if (gainDbLabel) gainDbLabel.textContent = gainLabel(actual);
-        if (gainStatus)  gainStatus.textContent = '';
-        ZP.toast(`Gain → ${gainLabel(actual)}`, 'ok');
-      } else {
-        // amixer found no matching control — show diagnostics.
-        ZP.toast('Gain control not responded — see device info below', 'error');
-        applyGainUi(db, false);
+      const res = await ZP.api('/gain', { method: 'POST', body: { percent } });
+      applyGainUi(res);
+      if (!res.ok && res.supported) {
+        ZP.toast(`Device clamped gain to ${res.percent}%`, '');
+      } else if (!res.supported) {
+        ZP.toast('No software input gain on this interface', 'error');
       }
     } catch (err) {
       ZP.toast(err.message, 'error');
-      if (gainStatus) gainStatus.textContent = '';
     } finally {
-      gainPending = false;
+      gainInFlight = false;
+      if (gainQueued !== null) {
+        const next = gainQueued;
+        gainQueued = null;
+        sendGain(next);
+      }
     }
   }
 
   if (gainSlider) {
     gainSlider.addEventListener('input', () => {
-      if (gainDbLabel) gainDbLabel.textContent = gainLabel(gainSlider.value);
+      // Optimistic label while dragging; the read-back corrects it after.
+      if (gainValue) gainValue.textContent = `${gainSlider.value}%`;
       clearTimeout(gainDebounce);
-      // 400 ms debounce — avoids flooding amixer while scrubbing the slider.
-      gainDebounce = setTimeout(() => sendGain(parseInt(gainSlider.value, 10)), 400);
+      gainDebounce = setTimeout(() => sendGain(parseInt(gainSlider.value, 10)), 150);
     });
   }
 
   document.querySelectorAll('[data-gain]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      if (!gainSupported) { ZP.toast('Gain control not available', 'error'); return; }
-      const db = parseInt(btn.dataset.gain, 10);
-      if (gainSlider)  gainSlider.value = db;
-      if (gainDbLabel) gainDbLabel.textContent = gainLabel(db);
+      if (!gainSupported) { ZP.toast('No software input gain on this interface', 'error'); return; }
+      const percent = parseInt(btn.dataset.gain, 10);
+      if (gainSlider) gainSlider.value = percent;
+      if (gainValue)  gainValue.textContent = `${percent}%`;
       clearTimeout(gainDebounce);
-      sendGain(db);
+      sendGain(percent);
     });
   });
 
-  // Load current gain on page open; show discovered controls if any.
-  ZP.api('/gain').then((r) => {
-    const hint = r.controls && r.controls.length
-      ? `Controls: ${r.controls.join(', ')}`
-      : '';
-    applyGainUi(r.gain_db, r.supported, hint);
-  }).catch(() => applyGainUi(0, false));
+  // Read the device's real gain on page open.
+  ZP.api('/gain')
+    .then(applyGainUi)
+    .catch(() => applyGainUi({ supported: false, percent: 0, db: null }));
 
   /* ── Wire up ─────────────────────────────────────────────────────────── */
 
