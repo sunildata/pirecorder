@@ -242,6 +242,28 @@ def set_gain():
     return jsonify(payload)
 
 
+@api.post("/gain/zero_db")
+@login_required
+def set_gain_zero_db():
+    """Find and apply the percent value that puts the capture gain closest to 0 dB."""
+    dev = audio_devices.select_device(config.get("audio_device"), probe=False)
+    if not dev:
+        return jsonify({"error": "No audio device found"}), 404
+
+    control = audio_devices.find_zero_db_percent(dev)
+    if control is None:
+        return jsonify({
+            **_gain_payload(None, False),
+            "ok": False,
+            "reason": "This interface does not report dB values — "
+                      "0 dB reset is not available.",
+        })
+
+    payload = _gain_payload(control, True)
+    payload["ok"] = True
+    return jsonify(payload)
+
+
 @api.get("/gain/controls")
 @login_required
 def gain_controls():

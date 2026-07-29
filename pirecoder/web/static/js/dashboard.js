@@ -418,6 +418,29 @@
     });
   });
 
+  const gainResetBtn = $('gain-reset-btn');
+  if (gainResetBtn) {
+    gainResetBtn.addEventListener('click', async () => {
+      if (!gainSupported) { ZP.toast('No software input gain on this interface', 'error'); return; }
+      gainResetBtn.disabled = true;
+      gainResetBtn.textContent = '…';
+      try {
+        const res = await ZP.api('/gain/zero_db', { method: 'POST' });
+        applyGainUi(res);
+        if (res.ok) {
+          ZP.toast(`Reset to ${res.db != null ? res.db.toFixed(1) + ' dB' : res.percent + '%'}`, '');
+        } else {
+          ZP.toast(res.reason || 'Could not find 0 dB point', 'error');
+        }
+      } catch (err) {
+        ZP.toast(err.message, 'error');
+      } finally {
+        gainResetBtn.disabled = false;
+        gainResetBtn.textContent = '↺ 0 dB';
+      }
+    });
+  }
+
   // Read the device's real gain on page open.
   ZP.api('/gain')
     .then(applyGainUi)

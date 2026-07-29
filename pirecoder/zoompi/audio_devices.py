@@ -237,6 +237,42 @@ def get_capture_gain(device: AudioDevice) -> CaptureControl | None:
     return find_capture_control(device)
 
 
+def find_zero_db_percent(device: AudioDevice) -> CaptureControl | None:
+    """Binary-search the control's percent range to find the value closest to 0 dB.
+
+    Uses at most 10 amixer round-trips (~7 are enough for a 0-100 range).
+    Returns None when the device has no capture volume or does not report dB.
+    Falls back to the closest-found value if an exact 0 dB step doesn't exist.
+    """
+    control = find_capture_control(device)
+    if control is None:
+        return None
+
+    lo, hi = 0, 100
+    best: CaptureControl | None = None
+
+    for _ in range(10):
+        mid = (lo + hi) // 2
+        result = set_capture_gain(device, mid)
+        if result is None:
+            return None
+        if result.db is None:
+            # Device doesn't report dB — nothing to search against.
+            return None
+        if best is None or abs(result.db) < abs(best.db):  # type: ignore[arg-type]
+            best = result
+        if abs(result.db) < 0.5:          # close enough — stop early
+            return result
+        if result.db > 0:
+            hi = mid - 1
+        else:
+            lo = mid + 1
+        if lo > hi:
+            break
+
+    return best
+
+
 def set_capture_gain(device: AudioDevice, percent: int) -> CaptureControl | None:
     """Set input gain to `percent` of the control's range.
 

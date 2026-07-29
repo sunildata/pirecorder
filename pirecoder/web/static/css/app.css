@@ -345,6 +345,20 @@ audio { width: 100%; margin-top: 9px; height: 34px; }
   border-color: var(--accent);
   font-weight: 700;
 }
+.gain-reset-btn {
+  flex: 0 0 auto;
+  min-width: 64px;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  font-weight: 600;
+}
+.gain-reset-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 15%, transparent) !important;
+}
+.gain-reset-btn:disabled {
+  opacity: .55;
+  cursor: wait;
+}
 .gain-status {
   font-size: 11px;
   color: var(--muted);
