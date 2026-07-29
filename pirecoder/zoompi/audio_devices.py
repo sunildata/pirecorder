@@ -14,6 +14,14 @@ from dataclasses import dataclass, asdict, field
 
 # arecord's format names, ordered best-first.
 FORMAT_BY_DEPTH = {32: "S32_LE", 24: "S24_3LE", 16: "S16_LE"}
+# Per-depth fallback list: some USB interfaces use the padded 32-bit
+# container for 24-bit audio (S32_LE) or the padded variant (S24_LE)
+# rather than the tightly-packed S24_3LE. We probe all candidates and
+# consider the depth supported if *any* format string works.
+FORMATS_FOR_DEPTH: dict[int, list[str]] = {
+    24: ["S24_3LE", "S24_LE", "S32_LE"],
+    16: ["S16_LE"],
+}
 CANDIDATE_DEPTHS = (24, 16)
 CANDIDATE_RATES = (96000, 48000, 44100)
 
@@ -47,28 +55,39 @@ def _run(cmd: list[str], timeout: int = 5) -> tuple[int, str, str]:
         return 1, "", ""
 
 
-def _probe(alsa_id: str, rate: int, depth: int, channels: int) -> bool:
-    """Ask ALSA to open the device with this exact format for a moment.
+def _probe_fmt(alsa_id: str, fmt: str, rate: int, channels: int) -> bool:
+    """Try to open the device with one specific arecord format string.
 
-    `-d 1` with `--test-position` would still record; instead we use a
-    zero-duration capture to /dev/null which fails fast if the format is
-    unsupported.
+    Uses a 0-second capture so the device is only opened, not actually
+    read. Returns True if ALSA accepted the format, False otherwise.
+    A "Device or resource busy" error still means the format is valid —
+    something else just holds the device open right now.
     """
-    fmt = FORMAT_BY_DEPTH.get(depth)
-    if not fmt:
-        return False
     rc, _, err = _run(
         [
             "arecord", "-D", alsa_id, "-f", fmt,
             "-r", str(rate), "-c", str(channels),
-            "-d", "1", "--duration=0", "-t", "raw", "/dev/null",
+            "--duration=0", "-t", "raw", "/dev/null",
         ],
         timeout=4,
     )
     if rc == 0:
         return True
-    # A busy device means the format is fine but something else holds it.
     return "Device or resource busy" in err
+
+
+def _probe(alsa_id: str, rate: int, depth: int, channels: int) -> bool:
+    """Return True if *any* format variant for `depth` works on this device.
+
+    Different USB chipsets expose 24-bit audio via different ALSA format
+    strings (S24_3LE packed, S24_LE padded, or even S32_LE). Trying only
+    the first candidate would incorrectly report 24-bit as unsupported on
+    many real interfaces.
+    """
+    for fmt in FORMATS_FOR_DEPTH.get(depth, [FORMAT_BY_DEPTH.get(depth, "")]):
+        if fmt and _probe_fmt(alsa_id, fmt, rate, channels):
+            return True
+    return False
 
 
 def list_devices(probe: bool = True) -> list[AudioDevice]:

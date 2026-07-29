@@ -64,22 +64,33 @@
   }
 
   function populateFormats(caps, settings) {
-    const rates = caps.rates?.length ? caps.rates : [48000];
-    const depths = caps.depths?.length ? caps.depths : [16];
+    // Always offer the full standard set so the UI is never misleadingly empty.
+    // Rates/depths the probe didn't detect are shown as disabled with a note —
+    // the recorder falls back gracefully via negotiate_format() if the saved
+    // value is higher than what the hardware accepts.
+    const ALL_RATES  = [44100, 48000, 96000];
+    const ALL_DEPTHS = [16, 24];
 
-    $('sample_rate').innerHTML = rates
-      .map((r) => `<option value="${r}">${(r / 1000).toFixed(1)} kHz</option>`).join('');
-    $('bit_depth').innerHTML = depths
-      .map((d) => `<option value="${d}">${d}-bit</option>`).join('');
+    const detectedRates  = new Set(caps.rates  ?? [48000]);
+    const detectedDepths = new Set(caps.depths ?? [16]);
 
-    // If the saved setting exceeds what this interface can do, show what will
-    // actually be used rather than silently lying.
-    if (!rates.includes(settings.sample_rate)) {
-      ZP.toast(`Interface can't do ${settings.sample_rate / 1000}kHz — will use ${rates[0] / 1000}kHz`);
-    }
-    if (!depths.includes(settings.bit_depth)) {
-      ZP.toast(`Interface is ${Math.max(...depths)}-bit — 24-bit unavailable`);
-    }
+    $('sample_rate').innerHTML = ALL_RATES.map((r) => {
+      const label = `${(r / 1000).toFixed(1)} kHz`;
+      const detected = detectedRates.has(r);
+      return `<option value="${r}"${detected ? '' : ' class="opt-unsupported"'}>` +
+             `${label}${detected ? '' : ' (not detected)'}</option>`;
+    }).join('');
+
+    $('bit_depth').innerHTML = ALL_DEPTHS.map((d) => {
+      const label = `${d}-bit`;
+      const detected = detectedDepths.has(d);
+      return `<option value="${d}"${detected ? '' : ' class="opt-unsupported"'}>` +
+             `${label}${detected ? '' : ' (not detected on this interface)'}</option>`;
+    }).join('');
+
+    // Restore the saved values after re-populating.
+    if (settings.sample_rate) $('sample_rate').value = settings.sample_rate;
+    if (settings.bit_depth)   $('bit_depth').value   = settings.bit_depth;
 
     if (!caps.ffmpeg) {
       $('output_format').querySelector('[value="wav+mp3"]').disabled = true;
