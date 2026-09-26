@@ -8,9 +8,11 @@ one is selected.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass, asdict, field
+from pathlib import Path
 
 # arecord's format names, ordered best-first.
 FORMAT_BY_DEPTH = {32: "S32_LE", 24: "S24_3LE", 16: "S16_LE"}
@@ -158,6 +160,59 @@ def negotiate_format(
     depth = want_depth if want_depth in depths else max(depths)
     channels = min(want_channels, max(1, device.max_channels))
     return rate, depth, channels
+
+
+SHARED_PCM = "spstudio_cap"
+_ASOUNDRC_BEGIN = "# BEGIN SPSTUDIO"
+_ASOUNDRC_END = "# END SPSTUDIO"
+
+
+def ensure_shared_pcm(device: AudioDevice, rate: int, depth: int, channels: int) -> str | None:
+    """Install a dsnoop PCM so recording and the live meter can share the card.
+
+    Cheap USB interfaces give `hw:` exclusive access. Metering from the WAV
+    file then only updates when arecord flushes — often ~1 s — which makes
+    the oscilloscope look like it reloads. dsnoop lets a second arecord read
+    PCM in real time without touching the file path.
+
+    Returns the PCM name on success, or None if the hook cannot be written.
+    """
+    fmt = FORMAT_BY_DEPTH.get(depth, "S16_LE")
+    period = max(128, rate // 50)          # ~20 ms
+    buffer_frames = period * 4             # ~80 ms
+    block = (
+        f"{_ASOUNDRC_BEGIN}\n"
+        f"pcm.{SHARED_PCM} {{\n"
+        f"    type plug\n"
+        f"    slave.pcm {{\n"
+        f"        type dsnoop\n"
+        f"        ipc_key 550055\n"
+        f"        ipc_perm 0666\n"
+        f"        slave {{\n"
+        f"            pcm \"{device.alsa_id}\"\n"
+        f"            format {fmt}\n"
+        f"            rate {rate}\n"
+        f"            channels {channels}\n"
+        f"            period_size {period}\n"
+        f"            buffer_size {buffer_frames}\n"
+        f"        }}\n"
+        f"    }}\n"
+        f"}}\n"
+        f"{_ASOUNDRC_END}\n"
+    )
+    path = Path(os.environ.get("HOME", str(Path.home()))) / ".asoundrc"
+    try:
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        if _ASOUNDRC_BEGIN in existing and _ASOUNDRC_END in existing:
+            pre = existing[: existing.index(_ASOUNDRC_BEGIN)]
+            post = existing[existing.index(_ASOUNDRC_END) + len(_ASOUNDRC_END) :]
+            text = pre.rstrip() + "\n" + block + post.lstrip("\n")
+        else:
+            text = (existing.rstrip() + "\n\n" if existing.strip() else "") + block
+        path.write_text(text, encoding="utf-8")
+        return SHARED_PCM
+    except OSError:
+        return None
 
 
 # ── Input gain (ALSA capture volume) ─────────────────────────────────────────

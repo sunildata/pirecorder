@@ -69,7 +69,10 @@
   const WF_BUF   = 600;
   const wfBuf    = new Float32Array(WF_BUF);
   let   wfHead   = 0;             // next write slot (wraps at WF_BUF)
-  let   wfPendingFrame = false;   // rAF coalescing guard
+  const wfQueue  = [];            // incoming points, drained at display rate
+  let   wfRaf    = 0;
+  let   wfLastTs = 0;
+  const WF_PTS_PER_SEC = 720;     // fills the 600-slot window in ~0.8 s
 
   const WF_BG   = '#0e1219';
   const WF_LINE = '#4f8cff';
@@ -129,28 +132,38 @@
     wfCtx.stroke();
   }
 
-  // Coalesce to one repaint per display frame. Samples are never dropped —
-  // they all land in the ring buffer — only redundant redraws are skipped if
-  // several socket frames arrive within a single screen refresh.
-  function waveformSchedule() {
-    if (wfPendingFrame) return;
-    wfPendingFrame = true;
-    requestAnimationFrame(() => {
-      wfPendingFrame = false;
+  function waveformDrain(ts) {
+    wfRaf = 0;
+    const dt = wfLastTs ? Math.min(0.05, (ts - wfLastTs) / 1000) : 0.016;
+    wfLastTs = ts;
+    if (wfQueue.length) {
+      let n = Math.max(1, Math.round(WF_PTS_PER_SEC * dt));
+      // Catch up if a large burst arrived so the queue never grows without bound.
+      if (wfQueue.length > 240) n = Math.max(n, Math.ceil(wfQueue.length / 18));
+      n = Math.min(n, wfQueue.length);
+      for (let i = 0; i < n; i++) {
+        wfBuf[wfHead] = wfQueue.shift();
+        wfHead = (wfHead + 1) % WF_BUF;
+      }
       waveformDraw();
-    });
+    }
+    if (wfQueue.length) {
+      wfRaf = requestAnimationFrame(waveformDrain);
+    }
   }
 
   function waveformPush(points) {
     if (!points || !points.length) return;
-    for (const v of points) {
-      wfBuf[wfHead] = v;
-      wfHead = (wfHead + 1) % WF_BUF;
+    for (let i = 0; i < points.length; i++) wfQueue.push(points[i]);
+    if (wfQueue.length > WF_BUF * 2) wfQueue.splice(0, wfQueue.length - WF_BUF);
+    if (!wfRaf) {
+      wfLastTs = 0;
+      wfRaf = requestAnimationFrame(waveformDrain);
     }
-    waveformSchedule();
   }
 
   function waveformClear() {
+    wfQueue.length = 0;
     wfBuf.fill(0);
     wfHead = 0;
     waveformDraw();
@@ -212,8 +225,12 @@
   }
 
   function startTick(run) {
-    clearInterval(tick);
-    if (!run) return;
+    if (!run) {
+      clearInterval(tick);
+      tick = null;
+      return;
+    }
+    if (tick) return;
     tick = setInterval(() => {
       localDuration += 1;
       el.timer.textContent = ZP.hms(localDuration);

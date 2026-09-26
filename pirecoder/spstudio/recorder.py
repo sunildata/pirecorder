@@ -32,6 +32,8 @@ from typing import Callable
 from .audio_devices import (
     AudioDevice,
     FORMAT_BY_DEPTH,
+    SHARED_PCM,
+    ensure_shared_pcm,
     negotiate_format,
     select_device,
 )
@@ -190,6 +192,9 @@ class Recorder:
         self._stop_watchdog = threading.Event()
         self._on_event = on_event or (lambda *_: None)
         self._last_error: str | None = None
+        # PCM name used by arecord. Prefer the shared dsnoop device so the
+        # level meter can read live audio; falls back to exclusive hw:.
+        self._capture_pcm: str | None = None
 
     # ── State ────────────────────────────────────────────────────────────────
 
@@ -237,6 +242,7 @@ class Recorder:
                 config.get("bit_depth"),
                 config.get("channels"),
             )
+            self._capture_pcm = ensure_shared_pcm(device, rate, depth, channels) or device.alsa_id
 
             free_mb = _free_megabytes(RECORDINGS_DIR)
             if free_mb < config.get("min_free_mb"):
@@ -372,6 +378,22 @@ class Recorder:
                 return None
             return self._session.segments[-1].path
 
+    def live_meter_args(self) -> tuple[str, int, int, int] | None:
+        """PCM + format for a second arecord that meters in real time.
+
+        Only available when capture is going through the shared dsnoop
+        device. Exclusive `hw:` cannot be opened twice.
+        """
+        with self._lock:
+            if not self._session or self._session.stopped_at is not None:
+                return None
+            if self._session.paused_at is not None:
+                return None
+            if self._capture_pcm != SHARED_PCM:
+                return None
+            s = self._session
+            return self._capture_pcm, s.sample_rate, s.bit_depth, s.channels
+
     # ── Internals ────────────────────────────────────────────────────────────
 
     def _segment_path(self, index: int) -> Path:
@@ -385,26 +407,39 @@ class Recorder:
         assert session is not None
 
         path = self._segment_path(index)
+        pcm = self._capture_pcm or session.device.alsa_id
+        proc = self._start_arecord(session, path, pcm)
+        if proc is None and pcm != session.device.alsa_id:
+            # dsnoop rejected by this interface — record exclusively and
+            # let the meter fall back to reading the WAV file.
+            self._capture_pcm = session.device.alsa_id
+            proc = self._start_arecord(session, path, session.device.alsa_id)
+        if proc is None:
+            raise RecorderError(self._last_error or "arecord failed to start")
+
+        self._proc = proc
+        session.segments.append(Segment(index=index, path=path, started_at=time.time()))
+        _write_journal(session)
+
+        if config.get("dual_recording"):
+            self._spawn_dual(index)
+
+    def _arecord_cmd(self, session: Session, path: Path, pcm: str) -> list[str]:
         fmt = FORMAT_BY_DEPTH.get(session.bit_depth, "S16_LE")
-        cmd = [
+        return [
             "arecord",
-            "-D", session.device.alsa_id,
+            "-D", pcm,
             "-f", fmt,
             "-r", str(session.sample_rate),
             "-c", str(session.channels),
             "-t", "wav",
-            # Buffer and period are separate concerns. The buffer is the safety
-            # margin against scheduling hiccups; the period is how often bytes
-            # actually reach the file.
-            # 200 ms buffer = 4 periods of safety on a loaded Pi 3B+.
-            # 50 ms period = 20 Hz flush rate, matching the level-meter poll.
-            # A 1 s buffer caused cheap USB chipsets to hold audio internally
-            # for ~1 s before writing, making the oscilloscope look frozen.
             "--buffer-time=200000",
-            "--period-time=50000",
+            "--period-time=20000",
             str(path),
         ]
 
+    def _start_arecord(self, session: Session, path: Path, pcm: str) -> subprocess.Popen | None:
+        cmd = self._arecord_cmd(session, path, pcm)
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -420,14 +455,9 @@ class Recorder:
         time.sleep(0.35)
         if proc.poll() is not None:
             err = (proc.stderr.read() or b"").decode(errors="replace").strip()
-            raise RecorderError(f"arecord failed to start: {err or 'unknown error'}")
-
-        self._proc = proc
-        session.segments.append(Segment(index=index, path=path, started_at=time.time()))
-        _write_journal(session)
-
-        if config.get("dual_recording"):
-            self._spawn_dual(index)
+            self._last_error = f"arecord {pcm}: {err or 'failed to start'}"
+            return None
+        return proc
 
     def _spawn_dual(self, index: int) -> None:
         """Second take at -12 dB as insurance against clipping the master."""

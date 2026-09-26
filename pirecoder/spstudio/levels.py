@@ -18,11 +18,15 @@ from __future__ import annotations
 
 import math
 import os
+import select
+import subprocess
 import sys
 import threading
 import time
 from array import array
 from pathlib import Path
+
+from .audio_devices import FORMAT_BY_DEPTH
 
 WAV_HEADER_SIZE = 44
 CLIP_THRESHOLD = 0.99      # fraction of full scale counted as clipping
@@ -70,6 +74,12 @@ class LevelMeter:
         self._read_path: Path | None = None
         self._read_pos = 0
 
+        # Live ALSA tap (second arecord on the shared dsnoop PCM).
+        self._live_proc: subprocess.Popen | None = None
+        self._live_key: tuple | None = None
+        self._live_buf = bytearray()
+        self._live_disabled = False
+
     @staticmethod
     def _empty() -> dict:
         return {
@@ -92,6 +102,7 @@ class LevelMeter:
 
     def stop(self) -> None:
         self._stop.set()
+        self._stop_live()
 
     def read(self) -> dict:
         with self._lock:
@@ -104,50 +115,107 @@ class LevelMeter:
     # ── Internals ────────────────────────────────────────────────────────────
 
     def _run(self) -> None:
-        while not self._stop.wait(self._interval):
+        while not self._stop.wait(0.01):
             try:
-                self._sample()
+                args = None
+                getter = getattr(self._recorder, "live_meter_args", None)
+                if callable(getter):
+                    args = getter()
+                if args and not self._live_disabled:
+                    self._sample_live(args)
+                else:
+                    if not args:
+                        self._live_disabled = False
+                        self._stop_live()
+                    self._sample()
+                    self._stop.wait(self._interval)
             except Exception:
                 # Metering is cosmetic — it must never take down the process.
+                self._stop_live()
                 with self._lock:
                     self._levels = self._empty()
 
-    def _sample(self) -> None:
-        path = self._recorder.current_segment_path()
-        status = self._recorder.status()
-        session = status.get("session")
+    def _stop_live(self) -> None:
+        proc = self._live_proc
+        self._live_proc = None
+        self._live_key = None
+        self._live_buf.clear()
+        if proc is None:
+            return
+        try:
+            proc.kill()
+            proc.wait(timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
-        if path is None or session is None or not status.get("is_recording"):
-            with self._lock:
-                self._levels = self._empty()
-            self._read_path = None
+    def _ensure_live(self, args: tuple[str, int, int, int]) -> bool:
+        pcm, rate, depth, channels = args
+        key = args
+        if self._live_proc is not None and self._live_key == key and self._live_proc.poll() is None:
+            return True
+        self._stop_live()
+        fmt = FORMAT_BY_DEPTH.get(depth, "S16_LE")
+        try:
+            self._live_proc = subprocess.Popen(
+                [
+                    "arecord", "-D", pcm, "-f", fmt,
+                    "-r", str(rate), "-c", str(channels),
+                    "-t", "raw", "--period-time=20000", "--buffer-time=80000",
+                    "-",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                bufsize=0,
+            )
+        except (FileNotFoundError, OSError):
+            return False
+        time.sleep(0.15)
+        if self._live_proc.poll() is not None:
+            self._stop_live()
+            return False
+        self._live_key = key
+        return True
+
+    def _sample_live(self, args: tuple[str, int, int, int]) -> None:
+        if not self._ensure_live(args):
+            self._live_disabled = True
+            self._sample()
+            self._stop.wait(self._interval)
             return
 
-        channels = int(session["channels"])
-        depth = int(session["bit_depth"])
-        rate = int(session["sample_rate"])
+        pcm, rate, depth, channels = args
         width = depth // 8
-        frame = channels * width
+        frame = max(1, channels * width)
+        want = max(frame, int(rate * 0.05) * frame)
+        proc = self._live_proc
+        assert proc is not None and proc.stdout is not None
 
-        chunk = self._read_new(path, frame, max_bytes=int(rate * MAX_LAG_SECONDS) * frame)
-        if not chunk:
-            # No new audio since the last poll. Clear the waveform so the
-            # Broadcaster doesn't keep re-sending stale points — that causes
-            # the oscilloscope to look like it reloads once per second instead
-            # of scrolling smoothly. The JS waveformPush([]) is a no-op, so
-            # the ring buffer stays frozen showing the last real frame.
-            with self._lock:
-                self._levels = {**self._levels, "waveform": []}
+        ready, _, _ = select.select([proc.stdout], [], [], 0.08)
+        if ready:
+            data = proc.stdout.read(want)
+            if data:
+                self._live_buf.extend(data)
+
+        usable = len(self._live_buf) - (len(self._live_buf) % frame)
+        if usable < frame:
             return
+        chunk = bytes(self._live_buf[:usable])
+        del self._live_buf[:usable]
+        # Keep only the newest 80 ms if the reader stalled.
+        max_keep = int(rate * 0.08) * frame
+        if len(chunk) > max_keep:
+            chunk = chunk[-max_keep:]
+            chunk = chunk[len(chunk) % frame:]
+        self._publish_chunk(chunk, channels, width, rate)
 
-        # Decode once and share — at 20 Hz a second pass would double the CPU
-        # cost, and 24-bit decoding runs a Python-level loop.
+    def _publish_chunk(self, chunk: bytes, channels: int, width: int, rate: int) -> None:
         samples = self._decode(chunk, width)
         if not samples:
             return
-
         peaks, rms = self._analyse(samples, channels, width)
-        waveform = self._make_waveform(samples, channels, width)
+        n_frames = max(1, len(samples) // max(1, channels))
+        n_points = max(16, min(120, int(n_frames / rate * 800)))
+        waveform = self._make_waveform(samples, channels, width, n_points)
         now = time.time()
 
         with self._lock:
@@ -171,6 +239,31 @@ class LevelMeter:
                 "active": True,
                 "waveform": waveform,
             }
+
+    def _sample(self) -> None:
+        path = self._recorder.current_segment_path()
+        status = self._recorder.status()
+        session = status.get("session")
+
+        if path is None or session is None or not status.get("is_recording"):
+            with self._lock:
+                self._levels = self._empty()
+            self._read_path = None
+            return
+
+        channels = int(session["channels"])
+        depth = int(session["bit_depth"])
+        rate = int(session["sample_rate"])
+        width = depth // 8
+        frame = channels * width
+
+        chunk = self._read_new(path, frame, max_bytes=int(rate * MAX_LAG_SECONDS) * frame)
+        if not chunk:
+            with self._lock:
+                self._levels = {**self._levels, "waveform": []}
+            return
+
+        self._publish_chunk(chunk, channels, width, rate)
 
     def _read_new(self, path: Path, frame: int, max_bytes: int) -> bytes:
         """Read every byte written since the last poll, frame-aligned.
