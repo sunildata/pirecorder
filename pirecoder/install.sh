@@ -12,7 +12,7 @@ set -uo pipefail
 readonly INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SERVICE_USER="${SUDO_USER:-$USER}"
 readonly RECORDINGS_DIR="${INSTALL_DIR}/recordings"
-readonly SERVICE_NAME="SPstudio"
+readonly SERVICE_NAME="spstudio"
 readonly PORT=5000
 
 WITH_HARDWARE=0
@@ -113,9 +113,9 @@ fi
 # Sets the Pi hostname to "SPstudio" so it is reachable as SPstudio.local on any
 # network — no need to know the IP address. Works on iOS, macOS, Android,
 # and Windows 10/11 out of the box.
-step "mDNS hostname (SPstudio.local)"
+step "mDNS hostname (spstudio.local)"
 
-DESIRED_HOST="SPstudio"
+DESIRED_HOST="spstudio"
 CURRENT_HOST="$(hostname)"
 
 if [ "$CURRENT_HOST" != "$DESIRED_HOST" ]; then
@@ -429,7 +429,7 @@ cat <<EOF
 ╚══════════════════════════════════════════════════════╝
 
   Open on your phone (easy — works on any network):
-    http://SPstudio.local:${PORT}
+    http://spstudio.local:${PORT}
 
   Or by IP address (if .local doesn't work on Android):
     http://${IP}:${PORT}
@@ -440,7 +440,7 @@ cat <<EOF
   journalctl -u ${SERVICE_NAME} -f      live logs
   bash install.sh --uninstall    remove services
 
-  TIP: Bookmark  http://SPstudio.local:${PORT}  — it works
+  TIP: Bookmark  http://spstudio.local:${PORT}  — it works
        even when the IP address changes.
 
 EOF
