@@ -19,6 +19,10 @@ Environment=SPSTUDIO_RECORDINGS=__RECORDINGS_DIR__
 # USB audio interfaces enumerate a few seconds after the network is up.
 # Starting before ALSA sees the card makes the first recording attempt fail.
 ExecStartPre=/bin/sleep 8
+# Apply correct ALSA mixer settings after USB device is available.
+# alsactl restore runs too early at boot (before USB enumerates), so
+# the device resets to its hardware default (100% gain). We fix it here.
+ExecStartPre=/bin/sh -c 'for card in $(arecord -l 2>/dev/null | grep "^card" | awk "{print \$2}" | tr -d ":"); do amixer -c "$card" sset "Auto Gain Control" off 2>/dev/null || true; amixer -c "$card" sset "Mic" 34%% 2>/dev/null || true; done'
 ExecStart=/usr/bin/python3 __INSTALL_DIR__/run.py
 
 Restart=always
