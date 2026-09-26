@@ -1,4 +1,4 @@
-# ZoomPi
+# SPstudio
 
 A professional wireless audio recorder for Raspberry Pi, built for live
 events, conferences, churches, weddings, and studio mixer feeds — situations
@@ -59,12 +59,12 @@ operation. Fully offline; no cloud dependency of any kind.
 On a Raspberry Pi running Raspberry Pi OS Lite (64-bit):
 
 ```bash
-git clone <your-repo-url> ~/zoompi
-cd ~/zoompi
+git clone <your-repo-url> ~/SPstudio
+cd ~/SPstudio
 bash install.sh
 ```
 
-Then open `http://<pi-ip>:5000` on your phone. Default password: `zoompi` —
+Then open `http://<pi-ip>:5000` on your phone. Default password: `SPstudio` —
 change it in Settings.
 
 For GPIO buttons and an OLED:
@@ -87,7 +87,7 @@ Full OS preparation, tuning, and SD-image instructions are in
 | USB audio interface with line input | Behringer UCA202 (16-bit) or UM2 / Scarlett Solo (24-bit) |
 | 5 V **2.5 A+** power supply | Under-voltage is the top cause of USB audio dropouts |
 
-Note: the UCA202/UCA222 is **16-bit/48 kHz only**. ZoomPi probes your
+Note: the UCA202/UCA222 is **16-bit/48 kHz only**. SPstudio probes your
 interface at startup and offers only the formats it genuinely supports, so
 you always know what you are actually recording. See
 [`docs/HARDWARE.md`](docs/HARDWARE.md).
@@ -97,7 +97,7 @@ you always know what you are actually recording. See
 ## Project layout
 
 ```
-zoompi/
+SPstudio/
 ├── recorder.py        arecord supervisor — the critical path
 ├── levels.py          VU metering by reading the file tail
 ├── audio_devices.py   Capability probing

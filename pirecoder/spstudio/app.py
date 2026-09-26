@@ -136,7 +136,7 @@ class Broadcaster:
 def _configure_logging() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     handler = RotatingFileHandler(
-        LOG_DIR / "zoompi.log", maxBytes=2_000_000, backupCount=3
+        LOG_DIR / "SPstudio.log", maxBytes=2_000_000, backupCount=3
     )
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
@@ -151,7 +151,7 @@ def _configure_logging() -> None:
 
 def create_app() -> tuple[Flask, SocketIO]:
     _configure_logging()
-    log = logging.getLogger("zoompi")
+    log = logging.getLogger("SPstudio")
 
     app = Flask(
         __name__,
@@ -238,7 +238,7 @@ def create_app() -> tuple[Flask, SocketIO]:
         log.warning("NetworkManager unavailable — Wi-Fi management disabled")
 
     db.log_event("service_started", {"version": _version(), "recovered": len(recovered)})
-    log.info("ZoomPi ready on http://%s:5000", system.primary_ip())
+    log.info("SPstudio ready on http://%s:5000", system.primary_ip())
     return app, socketio
 
 

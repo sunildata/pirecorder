@@ -11,7 +11,7 @@ Before writing, open the gear icon and pre-configure:
 
 | Setting | Value |
 |---|---|
-| Hostname | `zoompi` |
+| Hostname | `SPstudio` |
 | Enable SSH | Yes, password authentication |
 | Username | `pi` (the installer adapts to any name) |
 | Wi-Fi SSID / password | Your network |
@@ -21,7 +21,7 @@ Before writing, open the gear icon and pre-configure:
 ### 2. First boot
 
 ```bash
-ssh pi@zoompi.local        # or ssh pi@<ip>
+ssh pi@SPstudio.local        # or ssh pi@<ip>
 sudo apt update && sudo apt full-upgrade -y
 sudo reboot
 ```
@@ -112,11 +112,11 @@ ls -la /tmp/test.wav         # ~960 KB for 5 s stereo 48 kHz 16-bit
 
 If `arecord -l` shows nothing, try a different USB port or a powered hub.
 
-### 5. Install ZoomPi
+### 5. Install SPstudio
 
 ```bash
-git clone <your-repo-url> ~/zoompi
-cd ~/zoompi
+git clone <your-repo-url> ~/SPstudio
+cd ~/SPstudio
 bash install.sh              # add --hardware for GPIO/OLED support
 ```
 
@@ -128,7 +128,7 @@ When it finishes:
 
 ```
 Open on your phone:   http://192.168.1.19:5000
-Default password:     zoompi
+Default password:     SPstudio
 ```
 
 **Change the password immediately** in Settings.
@@ -145,11 +145,11 @@ identical recorders.
 Remove anything machine-specific before imaging:
 
 ```bash
-cd ~/zoompi
-sudo systemctl stop zoompi
+cd ~/SPstudio
+sudo systemctl stop SPstudio
 
 # Recordings, database, logs, and the session secret must not ship
-rm -rf recordings/* data/zoompi.db* data/logs/* data/secret.key data/config.json
+rm -rf recordings/* data/SPstudio.db* data/logs/* data/secret.key data/config.json
 
 # Saved Wi-Fi credentials
 sudo rm -f /etc/NetworkManager/system-connections/*.nmconnection
@@ -176,7 +176,7 @@ sudo shutdown -h now
 diskutil list                       # macOS: identify the card
 lsblk                               # Linux
 
-sudo dd if=/dev/sdX of=zoompi.img bs=4M status=progress conv=fsync
+sudo dd if=/dev/sdX of=SPstudio.img bs=4M status=progress conv=fsync
 ```
 
 **Windows:** use Win32 Disk Imager's "Read" function, or Raspberry Pi
@@ -190,7 +190,7 @@ makes it auto-expand on first boot:
 ```bash
 wget https://raw.githubusercontent.com/Drewsif/PiShrink/master/pishrink.sh
 chmod +x pishrink.sh
-sudo ./pishrink.sh -Z zoompi.img zoompi-v1.0.img
+sudo ./pishrink.sh -Z SPstudio.img SPstudio-v1.0.img
 ```
 
 `-Z` gzips the result. A trimmed Lite install typically lands around 1.2 GB
@@ -201,7 +201,7 @@ compressed.
 Flash the image to a *different* card and confirm:
 
 - [ ] It boots and the filesystem expanded (`df -h`)
-- [ ] `systemctl status zoompi` is active
+- [ ] `systemctl status SPstudio` is active
 - [ ] The web interface loads
 - [ ] SSH host keys were regenerated (a new fingerprint on first connect)
 - [ ] No recordings from the source card
@@ -211,13 +211,13 @@ Flash the image to a *different* card and confirm:
 ### First-boot instructions for recipients
 
 ```
-1. Flash zoompi-v1.0.img.gz with Raspberry Pi Imager
+1. Flash SPstudio-v1.0.img.gz with Raspberry Pi Imager
 2. Insert the card, connect the USB audio interface, power on
 3. Wait ~90 seconds for first boot and filesystem expansion
-4. Connect your phone to the "ZoomPi" Wi-Fi network
-   Password: zoompi12345
+4. Connect your phone to the "SPstudio" Wi-Fi network
+   Password: SPstudio12345
 5. Browse to http://10.42.0.1:5000
-6. Log in with: zoompi
+6. Log in with: SPstudio
 7. Change both passwords in Settings
 8. Optionally add your venue Wi-Fi in Settings → Wi-Fi
 ```
@@ -240,12 +240,12 @@ press Stop, pull the card. The LED and OLED tell you what is happening.
 ### Service will not start
 
 ```bash
-sudo systemctl status zoompi
-sudo journalctl -u zoompi -n 50 --no-pager
+sudo systemctl status SPstudio
+sudo journalctl -u SPstudio -n 50 --no-pager
 
 # Run it in the foreground, where errors are obvious
-sudo systemctl stop zoompi
-python3 ~/zoompi/run.py
+sudo systemctl stop SPstudio
+python3 ~/SPstudio/run.py
 ```
 
 ### "Address already in use" / port 5000 taken
@@ -269,7 +269,7 @@ sudo systemctl disable --now pirecorder.service
 # If it is a stray manual run, kill the PID
 sudo kill <pid>
 
-sudo systemctl restart zoompi
+sudo systemctl restart SPstudio
 curl -s localhost:5000/api/health
 ```
 
@@ -306,7 +306,7 @@ changes do not apply to a running session.
 Almost always ALSA rejecting the requested format:
 
 ```bash
-sudo journalctl -u zoompi | grep -i arecord
+sudo journalctl -u SPstudio | grep -i arecord
 arecord -D hw:1,0 -f S24_3LE -r 48000 -c 2 -d 1 /tmp/x.wav
 ```
 
@@ -341,13 +341,13 @@ user to `netdev`. To confirm it worked:
 sudo -u pi nmcli general permissions | grep settings.modify.system
 
 # Did the watchdog try, and what happened?
-journalctl -u zoompi | grep -i wifi
+journalctl -u SPstudio | grep -i wifi
 ```
 
 Force the AP up by hand to see the real error:
 
 ```bash
-sudo -u pi nmcli connection up zoompi-ap
+sudo -u pi nmcli connection up SPstudio-ap
 ```
 
 Other things worth checking:
@@ -362,7 +362,7 @@ sudo raspi-config nonint get_wifi_country
 sudo raspi-config nonint do_wifi_country IN     # your ISO code
 
 # Does the profile exist?
-nmcli connection show | grep zoompi-ap
+nmcli connection show | grep SPstudio-ap
 ```
 
 Timing: the watchdog makes its first attempt about 10 seconds after the

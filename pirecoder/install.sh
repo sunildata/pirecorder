@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ZoomPi installer — idempotent. Detects what is already present, installs
+# SPstudio installer — idempotent. Detects what is already present, installs
 # only what is missing, and verifies the result by probing the running API.
 #
 #   bash install.sh              normal install / upgrade
@@ -12,7 +12,7 @@ set -uo pipefail
 readonly INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SERVICE_USER="${SUDO_USER:-$USER}"
 readonly RECORDINGS_DIR="${INSTALL_DIR}/recordings"
-readonly SERVICE_NAME="zoompi"
+readonly SERVICE_NAME="SPstudio"
 readonly PORT=5000
 
 WITH_HARDWARE=0
@@ -39,22 +39,22 @@ die()  { printf "  ${R}fail${N} %s\n" "$1"; exit 1; }
 
 # ── Uninstall ────────────────────────────────────────────────────────────────
 if [ "$UNINSTALL" -eq 1 ]; then
-  step "Removing ZoomPi services"
+  step "Removing SPstudio services"
   sudo systemctl disable --now "${SERVICE_NAME}.service"      2>/dev/null && ok "service stopped"
   sudo systemctl disable --now "${SERVICE_NAME}-health.timer" 2>/dev/null && ok "health timer stopped"
   sudo rm -f "/etc/systemd/system/${SERVICE_NAME}.service" \
              "/etc/systemd/system/${SERVICE_NAME}-health.service" \
              "/etc/systemd/system/${SERVICE_NAME}-health.timer" \
-             "/etc/polkit-1/rules.d/50-zoompi-network.rules" \
-             "/etc/sudoers.d/zoompi-nmcli"
-  sudo nmcli connection delete zoompi-ap 2>/dev/null && ok "hotspot profile removed"
+             "/etc/polkit-1/rules.d/50-spstudio-network.rules" \
+             "/etc/sudoers.d/SPstudio-nmcli"
+  sudo nmcli connection delete SPstudio-ap 2>/dev/null && ok "hotspot profile removed"
   sudo systemctl daemon-reload
   ok "services removed — recordings in ${RECORDINGS_DIR} were kept"
   exit 0
 fi
 
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║   ZoomPi — Wireless Audio Recorder Installer         ║"
+echo "║   SPstudio — Wireless Audio Recorder Installer         ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo "  install dir : ${INSTALL_DIR}"
 echo "  service user: ${SERVICE_USER}"
@@ -87,7 +87,7 @@ fi
 step "System packages"
 
 APT_NEEDED=()
-for pkg in alsa-utils python3-pip python3-flask curl; do
+for pkg in alsa-utils python3-pip python3-flask curl avahi-daemon avahi-utils; do
   if dpkg -s "$pkg" >/dev/null 2>&1; then
     skip "$pkg"
   else
@@ -108,6 +108,33 @@ if [ "${#APT_NEEDED[@]}" -gt 0 ]; then
   sudo apt-get install -y -qq "${APT_NEEDED[@]}" || die "apt install failed"
   ok "installed ${#APT_NEEDED[@]} package(s)"
 fi
+
+# ── 2b. mDNS hostname (.local) ───────────────────────────────────────────────
+# Sets the Pi hostname to "SPstudio" so it is reachable as SPstudio.local on any
+# network — no need to know the IP address. Works on iOS, macOS, Android,
+# and Windows 10/11 out of the box.
+step "mDNS hostname (SPstudio.local)"
+
+DESIRED_HOST="SPstudio"
+CURRENT_HOST="$(hostname)"
+
+if [ "$CURRENT_HOST" != "$DESIRED_HOST" ]; then
+  sudo hostnamectl set-hostname "$DESIRED_HOST" 2>/dev/null \
+    || echo "$DESIRED_HOST" | sudo tee /etc/hostname >/dev/null
+  # Update /etc/hosts so local name resolution stays consistent.
+  sudo sed -i "s/\b${CURRENT_HOST}\b/${DESIRED_HOST}/g" /etc/hosts
+  ok "hostname changed: ${CURRENT_HOST} → ${DESIRED_HOST}"
+else
+  skip "hostname already set to ${DESIRED_HOST}"
+fi
+
+# Enable and start avahi-daemon for mDNS (.local) advertisements.
+if systemctl is-enabled avahi-daemon >/dev/null 2>&1; then
+  skip "avahi-daemon already enabled"
+else
+  sudo systemctl enable avahi-daemon >/dev/null 2>&1 && ok "avahi-daemon enabled"
+fi
+sudo systemctl restart avahi-daemon 2>/dev/null && ok "avahi-daemon running"
 
 # ── 3. Python packages ───────────────────────────────────────────────────────
 step "Python packages"
@@ -212,9 +239,9 @@ if command -v nmcli >/dev/null 2>&1; then
   POLKIT_DIR=/etc/polkit-1/rules.d
   if [ -d "$POLKIT_DIR" ]; then
     sed "s|__USER__|${SERVICE_USER}|g" \
-        "${INSTALL_DIR}/systemd/50-zoompi-network.rules" \
-      | sudo tee "${POLKIT_DIR}/50-zoompi-network.rules" >/dev/null
-    sudo chmod 644 "${POLKIT_DIR}/50-zoompi-network.rules"
+        "${INSTALL_DIR}/systemd/50-spstudio-network.rules" \
+      | sudo tee "${POLKIT_DIR}/50-spstudio-network.rules" >/dev/null
+    sudo chmod 644 "${POLKIT_DIR}/50-spstudio-network.rules"
     ok "polkit rule installed"
     sudo systemctl restart polkit 2>/dev/null || true
   else
@@ -223,12 +250,12 @@ if command -v nmcli >/dev/null 2>&1; then
 
   # Belt and braces: the code retries through sudo if polkit still refuses.
   echo "${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/nmcli" \
-    | sudo tee /etc/sudoers.d/zoompi-nmcli >/dev/null
-  sudo chmod 440 /etc/sudoers.d/zoompi-nmcli
-  if sudo visudo -cf /etc/sudoers.d/zoompi-nmcli >/dev/null 2>&1; then
+    | sudo tee /etc/sudoers.d/SPstudio-nmcli >/dev/null
+  sudo chmod 440 /etc/sudoers.d/SPstudio-nmcli
+  if sudo visudo -cf /etc/sudoers.d/SPstudio-nmcli >/dev/null 2>&1; then
     ok "sudoers fallback installed"
   else
-    sudo rm -f /etc/sudoers.d/zoompi-nmcli
+    sudo rm -f /etc/sudoers.d/SPstudio-nmcli
     warn "sudoers entry rejected — removed"
   fi
 else
@@ -246,13 +273,13 @@ render_unit() {
 }
 
 # Always rewrite: paths or the service user may have changed since last run.
-render_unit "${INSTALL_DIR}/systemd/zoompi.service" \
+render_unit "${INSTALL_DIR}/systemd/spstudio.service" \
   | sudo tee "/etc/systemd/system/${SERVICE_NAME}.service" >/dev/null
 ok "${SERVICE_NAME}.service"
 
-render_unit "${INSTALL_DIR}/systemd/zoompi-health.service" \
+render_unit "${INSTALL_DIR}/systemd/spstudio-health.service" \
   | sudo tee "/etc/systemd/system/${SERVICE_NAME}-health.service" >/dev/null
-sudo cp "${INSTALL_DIR}/systemd/zoompi-health.timer" \
+sudo cp "${INSTALL_DIR}/systemd/spstudio-health.timer" \
         "/etc/systemd/system/${SERVICE_NAME}-health.timer"
 ok "${SERVICE_NAME}-health.timer"
 
@@ -261,7 +288,7 @@ sudo systemctl enable "${SERVICE_NAME}.service" >/dev/null 2>&1 && ok "enabled a
 sudo systemctl enable "${SERVICE_NAME}-health.timer" >/dev/null 2>&1 || true
 
 # ── 6b. Retire earlier installations ─────────────────────────────────────────
-# Upgrading from the pre-ZoomPi prototype leaves its service running. Deleting
+# Upgrading from the pre-SPstudio prototype leaves its service running. Deleting
 # the old app.py during `git pull` does not stop the process that is already
 # running it, so it keeps holding port 5000 and the new service cannot bind.
 step "Checking for a previous installation"
@@ -401,12 +428,20 @@ cat <<EOF
 ║   Installation complete                              ║
 ╚══════════════════════════════════════════════════════╝
 
-  Open on your phone:   http://${IP}:${PORT}
-  Default password:     zoompi   (change it in Settings)
+  Open on your phone (easy — works on any network):
+    http://SPstudio.local:${PORT}
+
+  Or by IP address (if .local doesn't work on Android):
+    http://${IP}:${PORT}
+
+  Default password:     SPstudio   (change it in Settings)
 
   systemctl status ${SERVICE_NAME}      service state
   journalctl -u ${SERVICE_NAME} -f      live logs
   bash install.sh --uninstall    remove services
+
+  TIP: Bookmark  http://SPstudio.local:${PORT}  — it works
+       even when the IP address changes.
 
 EOF
 

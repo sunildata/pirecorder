@@ -24,7 +24,7 @@ import time
 from . import db
 from .config import config
 
-AP_CONNECTION = "zoompi-ap"
+AP_CONNECTION = "SPstudio-ap"
 _lock = threading.RLock()
 
 
@@ -252,35 +252,94 @@ def stop_ap() -> dict:
         return {"ok": True, "status": status()}
 
 
+def _link_alive() -> bool:
+    """Return True only when the Wi-Fi link has a real routable IP.
+
+    nmcli can report GENERAL.STATE=100 (connected) for up to ~90 seconds
+    after a hotspot disappears because NetworkManager hasn't declared the
+    link dead yet. Checking for a non-empty IP4 address is a reliable proxy:
+    if DHCP lost its lease the address field goes blank immediately.
+    """
+    iface = wifi_interface()
+    if not iface:
+        return False
+    rc, out, _ = _nmcli(
+        ["-t", "-f", "GENERAL.STATE,IP4.ADDRESS", "device", "show", iface]
+    )
+    if rc != 0:
+        return False
+    state_ok = False
+    has_ip = False
+    for line in out.splitlines():
+        key, _, value = line.partition(":")
+        if key == "GENERAL.STATE":
+            state_ok = value.strip().startswith("100")
+        elif key.startswith("IP4.ADDRESS") and value.strip():
+            has_ip = True
+    return state_ok and has_ip
+
+
 def auto_connect() -> dict:
     """Priority chain: saved networks, then hotspot entries, then own AP.
 
     Called at boot and whenever the link is lost. Runs on its own thread so a
     slow scan never stalls the web server.
+
+    When no saved network is visible on the first scan we wait up to
+    _SCAN_RETRY_SECS and try again before giving up and starting the AP.
+    This handles the common case where a mobile hotspot takes 15-30 s to
+    start broadcasting after it is switched on.
     """
+    _SCAN_RETRY_SECS = 30   # how long to keep retrying before AP fallback
+    _SCAN_RETRY_INT  = 10   # seconds between retry scans
+
     with _lock:
         mode = config.get("wifi_mode")
         if mode == "ap":
             return start_ap()
 
         current = status()
-        if current["connected"] and current["mode"] == "client":
+        if current["connected"] and current["mode"] == "client" and _link_alive():
             return {"ok": True, "reason": "already connected", "status": current}
 
-        visible = {n["ssid"] for n in scan(rescan=True)}
         saved = db.list_networks()
+        if not saved:
+            if mode == "client":
+                return {"ok": False, "error": "No saved networks"}
+            db.log_event("wifi_fallback_ap", {"reason": "no saved networks"})
+            return start_ap()
 
         # Non-hotspot saved networks first, then phone hotspots.
-        ordered = sorted(
-            saved, key=lambda n: (n["is_hotspot"], -n["priority"])
-        )
-        for net in ordered:
-            if net["ssid"] not in visible:
-                continue
-            psk = db.get_network_psk(net["ssid"]) or ""
-            result = connect(net["ssid"], psk, save=False)
-            if result.get("ok"):
-                return result
+        ordered = sorted(saved, key=lambda n: (n["is_hotspot"], -n["priority"]))
+
+        # Retry scanning for up to _SCAN_RETRY_SECS so a hotspot that is
+        # still warming up gets a second (and third) chance to appear.
+        deadline = time.monotonic() + _SCAN_RETRY_SECS
+        attempt = 0
+        while True:
+            attempt += 1
+            visible = {n["ssid"] for n in scan(rescan=True)}
+
+            for net in ordered:
+                if net["ssid"] not in visible:
+                    continue
+                psk = db.get_network_psk(net["ssid"]) or ""
+                result = connect(net["ssid"], psk, save=False)
+                if result.get("ok"):
+                    return result
+
+            # All saved networks tried and none connected — check if we still
+            # have time for another scan pass before declaring defeat.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            db.log_event("wifi_scan_retry", {"attempt": attempt, "remaining_s": int(remaining)})
+            # Release the lock while we wait so other callers aren't blocked.
+            _lock.release()
+            try:
+                time.sleep(min(_SCAN_RETRY_INT, remaining))
+            finally:
+                _lock.acquire()
 
         if mode == "client":
             return {"ok": False, "error": "No saved network in range"}
@@ -301,9 +360,14 @@ class WifiWatchdog:
 
     Recording is never consulted or interrupted — this only restores the
     control channel so the phone can reconnect and see live status.
+
+    Interval is 15 s (down from 45 s) so a dropped hotspot is detected and
+    recovered within ~15 s rather than up to a minute. The real link check
+    (_link_alive) catches a dead hotspot as soon as DHCP loses its lease,
+    rather than waiting for NetworkManager's own slow timeout.
     """
 
-    def __init__(self, interval: float = 45.0, startup_delay: float = 10.0) -> None:
+    def __init__(self, interval: float = 15.0, startup_delay: float = 10.0) -> None:
         self._interval = interval
         # NetworkManager needs a moment after boot to finish its own attempt
         # at the saved networks; checking instantly would race it.
@@ -324,7 +388,7 @@ class WifiWatchdog:
     def _run(self) -> None:
         # Run the first check shortly after boot rather than one full interval
         # later. Without this, a Pi with no known network sat unreachable for
-        # 45 seconds because nothing had started the fallback AP yet.
+        # a full interval because nothing had started the fallback AP yet.
         if self._stop.wait(self._startup_delay):
             return
         self._check(first=True)
@@ -337,9 +401,17 @@ class WifiWatchdog:
             if not available():
                 return
             st = status()
-            if st["connected"]:
+
+            # Use _link_alive() instead of st["connected"] so we catch the
+            # common case where nmcli still says "connected" after a hotspot
+            # disappears but DHCP has already lost the IP address.
+            if st["connected"] and st["mode"] == "client" and _link_alive():
                 if first:
                     db.log_event("wifi_ready", {"ssid": st["ssid"], "mode": st["mode"]})
+                return
+
+            # If we're already in AP mode and the user configured ap-only, leave it.
+            if st["mode"] == "ap" and config.get("wifi_mode") == "ap":
                 return
 
             db.log_event(

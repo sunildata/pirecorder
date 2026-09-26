@@ -1,4 +1,4 @@
-# ZoomPi REST API
+# SPstudio REST API
 
 Base URL: `http://<pi-ip>:5000`
 
@@ -24,7 +24,7 @@ Errors carry `{"error": "<message>"}`.
 
 ### `POST /api/login`
 ```json
-{ "password": "zoompi" }
+{ "password": "SPstudio" }
 ```
 Returns `{"ok": true}` and sets the session cookie. Failures are delayed
 0.5 s and logged.
@@ -203,7 +203,7 @@ and the Pi 3 would spend minutes of CPU).
                  "throttled_since_boot": false },
   "ip": "192.168.1.19",
   "uptime": { "seconds": 14322, "human": "3h 58m" },
-  "hostname": "zoompi"
+  "hostname": "SPstudio"
 }
 ```
 
@@ -248,7 +248,7 @@ recording returns `409`.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `device_name` | str | `ZoomPi` | Shown in the UI and on the OLED |
+| `device_name` | str | `SPstudio` | Shown in the UI and on the OLED |
 | `auth_enabled` | bool | `true` | |
 | `sample_rate` | int | `48000` | Clamped to probed capability |
 | `bit_depth` | int | `16` | Raised to 24 only if supported |
@@ -265,7 +265,7 @@ recording returns `409`.
 | `post_highpass_hz` | int | `0` | |
 | `post_limiter` / `post_compressor` / `post_noise_gate` | bool | `false` | Offline only |
 | `wifi_mode` | str | `auto` | `auto` / `client` / `ap` |
-| `ap_ssid` / `ap_password` / `ap_channel` | | `ZoomPi` / `zoompi12345` / `7` | |
+| `ap_ssid` / `ap_password` / `ap_channel` | | `SPstudio` / `SPstudio12345` / `7` | |
 | `hardware_enabled` / `oled_enabled` | bool | `false` | Restart required |
 | `gpio_record_button` / `gpio_stop_button` / `gpio_status_led` | int | 17 / 27 / 22 | BCM numbering |
 
@@ -321,7 +321,7 @@ If the WebSocket is unavailable the client falls back to polling
 ```bash
 BASE=http://192.168.1.19:5000
 curl -s -c jar -X POST $BASE/api/login \
-     -H 'Content-Type: application/json' -d '{"password":"zoompi"}'
+     -H 'Content-Type: application/json' -d '{"password":"SPstudio"}'
 
 curl -s -b jar -X POST $BASE/api/record/start \
      -H 'Content-Type: application/json' \

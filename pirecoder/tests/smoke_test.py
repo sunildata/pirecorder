@@ -22,9 +22,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 # Point at a scratch directory so a real library is never touched.
-_TMP = tempfile.mkdtemp(prefix="zoompi-test-")
-os.environ["ZOOMPI_DATA"] = str(Path(_TMP) / "data")
-os.environ["ZOOMPI_RECORDINGS"] = str(Path(_TMP) / "recordings")
+_TMP = tempfile.mkdtemp(prefix="SPstudio-test-")
+os.environ["SPSTUDIO_DATA"] = str(Path(_TMP) / "data")
+os.environ["SPSTUDIO_RECORDINGS"] = str(Path(_TMP) / "recordings")
 
 PASSED, FAILED = 0, 0
 
@@ -48,7 +48,7 @@ def section(title: str) -> None:
 
 def test_levels() -> None:
     section("Level analyser (audioop-free)")
-    from zoompi.levels import LevelMeter, _to_dbfs
+    from SPstudio.levels import LevelMeter, _to_dbfs
 
     # Full-scale sine on L, silence on R.
     frames = 4800
@@ -87,8 +87,8 @@ def test_levels() -> None:
 
 def test_wav_repair() -> None:
     section("Crash recovery - WAV header repair")
-    from zoompi.recorder import _wav_header, repair_wav
-    from zoompi.storage import wav_duration
+    from SPstudio.recorder import _wav_header, repair_wav
+    from SPstudio.storage import wav_duration
 
     path = Path(_TMP) / "broken.wav"
     audio = b"\x00\x01" * 48000  # 0.5 s of stereo 16-bit at 48 kHz
@@ -119,7 +119,7 @@ def test_wav_repair() -> None:
 
 def test_config() -> None:
     section("Configuration")
-    from zoompi.config import Config
+    from SPstudio.config import Config
 
     path = Path(_TMP) / "cfg.json"
     cfg = Config(path)
@@ -149,13 +149,13 @@ def test_config() -> None:
 
 def test_auth() -> None:
     section("Authentication")
-    from zoompi.auth import hash_password, verify_password
+    from SPstudio.auth import hash_password, verify_password
 
     stored = hash_password("hunter2")
     check("correct password verifies", verify_password("hunter2", stored))
     check("wrong password rejected", not verify_password("hunter3", stored))
     check("hash is salted", hash_password("x") != hash_password("x"))
-    check("plaintext fallback works", verify_password("zoompi", "zoompi"))
+    check("plaintext fallback works", verify_password("SPstudio", "SPstudio"))
     check("empty stored value rejected", not verify_password("x", ""))
 
 
@@ -163,7 +163,7 @@ def test_auth() -> None:
 
 def test_storage_safety() -> None:
     section("Storage path traversal")
-    from zoompi.storage import StorageError, _resolve
+    from SPstudio.storage import StorageError, _resolve
 
     for folder, filename in [
         ("..", "passwd"),
@@ -188,8 +188,8 @@ def test_storage_safety() -> None:
 
 def test_http() -> None:
     section("HTTP routes")
-    from zoompi.app import create_app
-    from zoompi.config import config
+    from SPstudio.app import create_app
+    from SPstudio.config import config
 
     config.set("auth_enabled", True)
     config.set("password", "testpw")
@@ -247,7 +247,7 @@ def test_http() -> None:
 
 def test_db() -> None:
     section("Database")
-    from zoompi import db
+    from SPstudio import db
 
     db.init_db()
     db.save_session({
@@ -286,7 +286,7 @@ def test_db() -> None:
 
 def main() -> int:
     print("=" * 58)
-    print("  ZoomPi smoke test")
+    print("  SPstudio smoke test")
     print(f"  scratch dir: {_TMP}")
     print("=" * 58)
 

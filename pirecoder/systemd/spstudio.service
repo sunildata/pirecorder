@@ -1,5 +1,5 @@
 [Unit]
-Description=ZoomPi Wireless Audio Recorder
+Description=SPstudio Wireless Audio Recorder
 Documentation=file://__INSTALL_DIR__/docs/ARCHITECTURE.md
 After=network.target sound.target local-fs.target
 Wants=sound.target
@@ -14,7 +14,7 @@ WorkingDirectory=__INSTALL_DIR__
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=HOME=/home/__USER__
-Environment=ZOOMPI_RECORDINGS=__RECORDINGS_DIR__
+Environment=SPSTUDIO_RECORDINGS=__RECORDINGS_DIR__
 
 # USB audio interfaces enumerate a few seconds after the network is up.
 # Starting before ALSA sees the card makes the first recording attempt fail.
@@ -36,7 +36,7 @@ TimeoutStopSec=30
 
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=zoompi
+SyslogIdentifier=SPstudio
 
 [Install]
 WantedBy=multi-user.target

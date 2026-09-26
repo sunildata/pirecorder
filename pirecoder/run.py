@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""ZoomPi entry point.
+"""SPstudio entry point.
 
 Started by systemd as:
-    /usr/bin/python3 /home/pi/zoompi/run.py
+    /usr/bin/python3 /home/pi/SPstudio/run.py
 """
 
 from __future__ import annotations
 
 import sys
 
-from zoompi.app import create_app
+from spstudio.app import create_app
 
 HOST = "0.0.0.0"
 PORT = 5000

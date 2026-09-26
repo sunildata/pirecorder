@@ -1,5 +1,5 @@
 [Unit]
-Description=Run ZoomPi health check every 2 minutes
+Description=Run SPstudio health check every 2 minutes
 
 [Timer]
 OnBootSec=3min

@@ -1,4 +1,4 @@
-# ZoomPi Architecture
+# SPstudio Architecture
 
 ## The governing constraint
 
@@ -173,11 +173,11 @@ never modified — processed output is written as a separate `_processed` file.
 
 The Pi 3 has a single radio that cannot reliably host an AP and maintain a
 station link at once. `auto_connect()` therefore tries saved networks by
-priority, then phone hotspots, then falls back to hosting `ZoomPi`.
+priority, then phone hotspots, then falls back to hosting `SPstudio`.
 
 ### SQLite is optional metadata, not the source of truth
 
-A recording is valid if the WAV exists. Deleting `zoompi.db` loses notes and
+A recording is valid if the WAV exists. Deleting `SPstudio.db` loses notes and
 markers but never audio. WAL mode lets the recorder write markers while the
 web layer reads.
 

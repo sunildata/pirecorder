@@ -14,16 +14,16 @@ from pathlib import Path
 from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.environ.get("ZOOMPI_DATA", BASE_DIR / "data"))
-RECORDINGS_DIR = Path(os.environ.get("ZOOMPI_RECORDINGS", BASE_DIR / "recordings"))
+DATA_DIR = Path(os.environ.get("SPSTUDIO_DATA", BASE_DIR / "data"))
+RECORDINGS_DIR = Path(os.environ.get("SPSTUDIO_RECORDINGS", BASE_DIR / "recordings"))
 CONFIG_PATH = DATA_DIR / "config.json"
-DB_PATH = DATA_DIR / "zoompi.db"
+DB_PATH = DATA_DIR / "SPstudio.db"
 LOG_DIR = DATA_DIR / "logs"
 
 DEFAULTS: dict[str, Any] = {
     # ── Identity ────────────────────────────────────────────────────────────
-    "device_name": "ZoomPi",
-    "password": "zoompi",          # replaced by a hash on first save
+    "device_name": "SPstudio",
+    "password": "SPstudio",          # replaced by a hash on first save
     "auth_enabled": True,
     # ── Audio ───────────────────────────────────────────────────────────────
     "sample_rate": 48000,
@@ -54,8 +54,8 @@ DEFAULTS: dict[str, Any] = {
     "post_normalize_lufs": -16,    # target: -14 podcast, -16 streaming, -23 broadcast
     # ── Network ─────────────────────────────────────────────────────────────
     "wifi_mode": "auto",           # auto | ap | client
-    "ap_ssid": "ZoomPi",
-    "ap_password": "zoompi12345",
+    "ap_ssid": "SPstudio",
+    "ap_password": "SPstudio12345",
     "ap_channel": 7,               # Wi-Fi channel for the hosted hotspot (1–11)
     # ── Hardware add-ons ────────────────────────────────────────────────────
     "hardware_enabled": False,

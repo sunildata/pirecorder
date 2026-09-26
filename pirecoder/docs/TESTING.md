@@ -73,7 +73,7 @@ ls -la recordings/$(date +%F)/.*.journal.json     # should not exist
 ffprobe recordings/$(date +%F)/*.wav 2>&1 | grep Duration
 
 # Recovery was logged
-journalctl -u zoompi | grep -i recover
+journalctl -u SPstudio | grep -i recover
 ```
 
 You should lose only the last second or so. If the file will not open in a
@@ -108,7 +108,7 @@ repairs the partial file, and starts a new segment once the device returns.
 The dashboard shows "Capture hiccup — recording resumed automatically".
 
 ```bash
-journalctl -u zoompi | grep capture_restarted
+journalctl -u SPstudio | grep capture_restarted
 ```
 
 Audio during the unplugged window is genuinely gone — nothing can prevent
@@ -122,7 +122,7 @@ Run this before any event longer than a couple of hours.
 
 ```bash
 curl -s -c jar -X POST http://localhost:5000/api/login \
-     -H 'Content-Type: application/json' -d '{"password":"zoompi"}'
+     -H 'Content-Type: application/json' -d '{"password":"SPstudio"}'
 curl -s -b jar -X POST http://localhost:5000/api/record/start \
      -H 'Content-Type: application/json' -d '{"label":"endurance"}'
 
@@ -198,7 +198,7 @@ trigger recovery, or the file was still being written.
 
 1. Send a steady 1 kHz tone from the mixer at its nominal output.
 2. Watch the meters — they should read around −18 dBFS for a 0 VU tone.
-3. Push the mixer to its clip point; ZoomPi's clip indicator should latch.
+3. Push the mixer to its clip point; SPstudio's clip indicator should latch.
 
 If the meters never approach 0 dBFS even at full mixer output, your interface
 input gain is too low. If they clip while the mixer shows healthy levels, the
@@ -250,7 +250,7 @@ curl -s -b jar -X POST localhost:5000/api/wifi/auto
 ```
 
 **Fallback test:** save a network, power off its router, reboot the Pi. Within
-about a minute the Pi should be hosting `ZoomPi`. Connect your phone to it and
+about a minute the Pi should be hosting `SPstudio`. Connect your phone to it and
 browse to `http://10.42.0.1:5000`.
 
 **Critical:** run `POST /api/wifi/auto` *while recording* and confirm the take
@@ -261,14 +261,14 @@ is unaffected. Network changes must never touch audio.
 ## Health monitoring
 
 ```bash
-systemctl status zoompi zoompi-health.timer
-systemctl list-timers zoompi-health.timer
+systemctl status SPstudio spstudio-health.timer
+systemctl list-timers spstudio-health.timer
 curl -s localhost:5000/api/health
 
 # Simulate a wedged process — the timer should restart it within 2 minutes
 sudo kill -STOP $(pgrep -f 'python3.*run.py')
 sleep 150
-systemctl status zoompi        # should have restarted
+systemctl status SPstudio        # should have restarted
 ```
 
 ---
@@ -288,7 +288,7 @@ Print this.
 - [ ] Wi-Fi plan decided (venue network vs. own hotspot) and tested on site
 - [ ] Password changed from the default
 - [ ] A 10-minute full-chain rehearsal recorded and played back
-- [ ] `journalctl -u zoompi -p warning` is clean
+- [ ] `journalctl -u SPstudio -p warning` is clean
 - [ ] Auto-split configured (2 GB is a sensible default)
 - [ ] If it truly cannot be lost: a second recorder running in parallel
 

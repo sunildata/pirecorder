@@ -61,7 +61,7 @@ Mixer MAIN OUT / REC OUT / AUX  ──►  Interface LINE IN (L/R)
                                           └── USB ──►  Raspberry Pi
 ```
 
-Set the mixer so peaks land around **−12 to −6 dBFS** on the ZoomPi meters.
+Set the mixer so peaks land around **−12 to −6 dBFS** on the SPstudio meters.
 Leaving that headroom is what makes the clip indicator useful rather than
 decorative.
 
@@ -166,7 +166,7 @@ Then turn on **GPIO buttons & LED** (and **OLED display**) in Settings and
 restart:
 
 ```bash
-sudo systemctl restart zoompi
+sudo systemctl restart SPstudio
 ```
 
 If `gpiozero` is not installed, the toggles still appear but Settings shows

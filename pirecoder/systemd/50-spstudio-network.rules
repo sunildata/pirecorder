@@ -1,4 +1,4 @@
-// Allow the ZoomPi service to manage Wi-Fi.
+// Allow the SPstudio service to manage Wi-Fi.
 //
 // NetworkManager's default polkit policy grants network configuration only to
 // an *active local session*. A systemd service has no session and no seat, so
