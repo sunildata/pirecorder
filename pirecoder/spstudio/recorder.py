@@ -395,11 +395,12 @@ class Recorder:
             "-t", "wav",
             # Buffer and period are separate concerns. The buffer is the safety
             # margin against scheduling hiccups; the period is how often bytes
-            # actually reach the file. A large period is what made live metering
-            # lag ~1 s behind, so keep a 1 s buffer but flush every 50 ms.
-            # (Units are microseconds. The previous --buffer-size took *frames*,
-            # so 192000 was 4 s at 48 kHz, not the 1 s intended.)
-            "--buffer-time=1000000",
+            # actually reach the file.
+            # 200 ms buffer = 4 periods of safety on a loaded Pi 3B+.
+            # 50 ms period = 20 Hz flush rate, matching the level-meter poll.
+            # A 1 s buffer caused cheap USB chipsets to hold audio internally
+            # for ~1 s before writing, making the oscilloscope look frozen.
+            "--buffer-time=200000",
             "--period-time=50000",
             str(path),
         ]

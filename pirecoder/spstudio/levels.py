@@ -131,6 +131,13 @@ class LevelMeter:
 
         chunk = self._read_new(path, frame, max_bytes=int(rate * MAX_LAG_SECONDS) * frame)
         if not chunk:
+            # No new audio since the last poll. Clear the waveform so the
+            # Broadcaster doesn't keep re-sending stale points — that causes
+            # the oscilloscope to look like it reloads once per second instead
+            # of scrolling smoothly. The JS waveformPush([]) is a no-op, so
+            # the ring buffer stays frozen showing the last real frame.
+            with self._lock:
+                self._levels = {**self._levels, "waveform": []}
             return
 
         # Decode once and share — at 20 Hz a second pass would double the CPU
