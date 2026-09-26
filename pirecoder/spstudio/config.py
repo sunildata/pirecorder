@@ -28,7 +28,7 @@ DEFAULTS: dict[str, Any] = {
     # ── Audio ───────────────────────────────────────────────────────────────
     "sample_rate": 48000,
     "bit_depth": 16,               # raised to 24 automatically if supported
-    "channels": 2,                 # 1 = mono, 2 = stereo
+    "channels": 1,                 # 1 = mono, 2 = stereo (most USB dongles are mono-only)
     "audio_device": "auto",        # "auto" or an ALSA id such as "hw:1,0"
     "capture_gain": 0,             # dB applied by the interface mixer
     # ── Recording behaviour ─────────────────────────────────────────────────

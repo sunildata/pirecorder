@@ -204,6 +204,20 @@ else
   warn "no capture device detected — plug in your USB interface before recording"
 fi
 
+# ── 4b. Disable Auto Gain Control on all USB audio cards ─────────────────────
+# AGC pumps the gain in quiet passages, amplifying the noise floor into an
+# audible hum. It must be off for clean recordings. alsactl store persists
+# the setting so it survives a reboot via alsa-restore.service.
+step "Audio mixer settings"
+
+USB_CARDS="$(arecord -l 2>/dev/null | grep '^card' | awk '{print $2}' | tr -d ':')"
+for CARD in $USB_CARDS; do
+  if amixer -c "$CARD" sset "Auto Gain Control" off >/dev/null 2>&1; then
+    ok "card ${CARD}: Auto Gain Control disabled"
+  fi
+done
+sudo alsactl store 2>/dev/null && ok "ALSA state saved (persists on reboot)" || true
+
 # ── 5. Directories ───────────────────────────────────────────────────────────
 step "Directories"
 
