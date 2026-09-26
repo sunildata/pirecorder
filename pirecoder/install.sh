@@ -212,8 +212,14 @@ step "Audio mixer settings"
 
 USB_CARDS="$(arecord -l 2>/dev/null | grep '^card' | awk '{print $2}' | tr -d ':')"
 for CARD in $USB_CARDS; do
+  # Disable AGC — it pumps gain in quiet passages, amplifying noise into a hum.
   if amixer -c "$CARD" sset "Auto Gain Control" off >/dev/null 2>&1; then
     ok "card ${CARD}: Auto Gain Control disabled"
+  fi
+  # Reset Mic capture to 0 dB (34% on a 0-35 range device).
+  # 100% = +23 dB which clips on any real input and causes distortion.
+  if amixer -c "$CARD" sset "Mic" 34% >/dev/null 2>&1; then
+    ok "card ${CARD}: Mic capture reset to 34% (0 dB)"
   fi
 done
 sudo alsactl store 2>/dev/null && ok "ALSA state saved (persists on reboot)" || true
