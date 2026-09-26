@@ -30,8 +30,8 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"
-        onerror="document.getElementById('toast').textContent='Socket.IO CDN unreachable — using polling'"></script>
+<!-- Served locally by Flask-SocketIO — no internet required -->
+<script src="/socket.io/socket.io.js"></script>
 <script src="{{ url_for('static', filename='js/common.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
